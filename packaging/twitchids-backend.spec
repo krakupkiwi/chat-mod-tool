@@ -271,8 +271,8 @@ a = Analysis(
         "tkinter", "_tkinter", "wx", "PyQt5", "PyQt6",
         # matplotlib (not needed — we use Recharts in the frontend)
         "matplotlib", "PIL",
-        # Test frameworks
-        "unittest", "doctest",
+        # Test frameworks (keep unittest — scipy.array_api_compat needs it at runtime)
+        "doctest",
         # Full transformers stack (we use fastembed ONNX directly)
         "transformers",
     ],
