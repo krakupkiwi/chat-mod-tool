@@ -14,6 +14,9 @@ dist-python/
 .env.*
 !.env.example
 
+# TwitchIO token cache — contains live OAuth access/refresh tokens at runtime.
+.tio.tokens.json
+
 # ── Node / Electron ───────────────────────────────────────────────────────────
 node_modules/
 dist/
@@ -41,3 +44,6 @@ screenshots/
 # settings.local.json may contain machine-specific paths and development secrets.
 # CLAUDE.md (project instructions) is intentionally committed.
 .claude/
+
+# ── Design / internal docs ────────────────────────────────────────────────────
+docs/
