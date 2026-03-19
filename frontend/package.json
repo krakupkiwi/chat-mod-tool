@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "clsx": "^2.1.1",
-    "electron-updater": "^6.3.9",
+    "electron-updater": "^6.8.3",
     "graphology": "^0.26.0",
     "graphology-layout": "^0.6.1",
     "graphology-layout-forceatlas2": "^0.10.1",
@@ -55,19 +55,25 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "extraResources": [
         {
           "from": "../dist-python/twitchids-backend/",
           "to": "python-backend/",
-          "filter": ["**/*"]
+          "filter": [
+            "**/*"
+          ]
         },
         {
           "from": "assets/tray/",
           "to": "assets/tray/",
-          "filter": ["*.png"]
+          "filter": [
+            "*.png"
+          ]
         }
       ]
     },
@@ -78,7 +84,7 @@
       "createStartMenuShortcut": true,
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico",
-      "license": "LICENSE.txt",
+      "license": "../LICENSE.txt",
       "deleteAppDataOnUninstall": false
     }
   }
