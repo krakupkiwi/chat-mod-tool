@@ -29,6 +29,19 @@ const path = require('path');
 const { PythonManager } = require('./python-manager');
 const log = require('./logger');
 
+// Auto-updater — only active in packaged builds (not during development)
+let autoUpdater = null;
+if (!process.env.ELECTRON_IS_DEV) {
+  try {
+    ({ autoUpdater } = require('electron-updater'));
+    autoUpdater.logger = log;
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+  } catch (err) {
+    log.warn(`electron-updater unavailable: ${err.message}`);
+  }
+}
+
 const isDev = !app.isPackaged;
 const pythonManager = new PythonManager();
 
@@ -357,6 +370,15 @@ function registerIPCHandlers() {
     }
   });
 
+  // Auto-updater controls
+  ipcMain.handle('check-for-updates', () => {
+    if (autoUpdater) autoUpdater.checkForUpdates();
+  });
+
+  ipcMain.on('install-update', () => {
+    if (autoUpdater) autoUpdater.quitAndInstall(false, true);
+  });
+
   // Health update from renderer → update tray + fire level-transition notifications
   ipcMain.on('tray-update', (_event, { score, level }) => {
     const prevLevel = lastHealthLevel;
@@ -381,6 +403,29 @@ app.whenReady().then(async () => {
     registerIPCHandlers();
     registerShortcuts();
     await startBackend();
+
+    // Check for updates ~5s after startup so the window is fully loaded
+    if (autoUpdater && app.isPackaged) {
+      setTimeout(() => {
+        autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+          log.warn(`Update check failed: ${err.message}`);
+        });
+      }, 5_000);
+
+      autoUpdater.on('update-available', (info) => {
+        log.info(`Update available: ${info.version}`);
+        mainWindow?.webContents.send('update-available', { version: info.version });
+      });
+
+      autoUpdater.on('update-downloaded', (info) => {
+        log.info(`Update downloaded: ${info.version}`);
+        mainWindow?.webContents.send('update-downloaded', { version: info.version });
+      });
+
+      autoUpdater.on('error', (err) => {
+        log.warn(`Auto-updater error: ${err.message}`);
+      });
+    }
   } catch (err) {
     log.error(`Fatal startup error: ${err.message}\n${err.stack}`);
   }

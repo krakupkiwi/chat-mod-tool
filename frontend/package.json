@@ -1,6 +1,6 @@
 {
   "name": "twitch-ids",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Twitch Chat Intrusion Detection System",
   "main": "electron/main.js",
   "scripts": {
@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "clsx": "^2.1.1",
+    "electron-updater": "^6.3.9",
     "graphology": "^0.26.0",
     "graphology-layout": "^0.6.1",
     "graphology-layout-forceatlas2": "^0.10.1",
@@ -44,24 +45,29 @@
     "directories": {
       "output": "../dist"
     },
+    "publish": {
+      "provider": "github",
+      "owner": "krakupkiwi",
+      "repo": "chat-mod-tool",
+      "releaseType": "release"
+    },
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
       ],
       "extraResources": [
         {
-          "from": "../dist-python/",
+          "from": "../dist-python/twitchids-backend/",
           "to": "python-backend/",
-          "filter": [
-            "**/*"
-          ]
+          "filter": ["**/*"]
         },
         {
           "from": "assets/tray/",
           "to": "assets/tray/",
-          "filter": [
-            "*.png"
-          ]
+          "filter": ["*.png"]
         }
       ]
     },
@@ -69,7 +75,11 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "license": "LICENSE.txt",
+      "deleteAppDataOnUninstall": false
     }
   }
 }

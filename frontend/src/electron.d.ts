@@ -13,6 +13,9 @@ interface ElectronAPI {
   getBackendConfig: () => Promise<{ port: number; ipcSecret: string } | null>;
   sendTrayUpdate: (score: number, level: string) => void;
   onDetectionMuteChanged: (callback: (data: { muted: boolean }) => void) => void;
+  onUpdateAvailable: (callback: (data: { version: string }) => void) => void;
+  onUpdateDownloaded: (callback: (data: { version: string }) => void) => void;
+  installUpdate: () => void;
 }
 
 interface Window {

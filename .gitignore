@@ -7,6 +7,7 @@ __pycache__/
 venv/
 *.egg-info/
 dist-python/
+build-python/
 
 # ── Environment / secrets ─────────────────────────────────────────────────────
 # NEVER commit real .env files — use .env.example as the template.

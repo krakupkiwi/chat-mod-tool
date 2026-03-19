@@ -84,4 +84,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showInFolder: (filePath) => {
     ipcRenderer.send('show-in-folder', filePath);
   },
+
+  /**
+   * Called when a new update is available (download starting automatically).
+   */
+  onUpdateAvailable: (callback) => {
+    ipcRenderer.on('update-available', (_event, data) => callback(data));
+  },
+
+  /**
+   * Called when an update has been downloaded and is ready to install.
+   */
+  onUpdateDownloaded: (callback) => {
+    ipcRenderer.on('update-downloaded', (_event, data) => callback(data));
+  },
+
+  /**
+   * Quit and install the downloaded update immediately.
+   */
+  installUpdate: () => {
+    ipcRenderer.send('install-update');
+  },
 });

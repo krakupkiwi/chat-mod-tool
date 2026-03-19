@@ -563,6 +563,41 @@ function Metric({ label, value }: { label: string; value: string | number }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Update toast — shown when electron-updater has a ready-to-install update
+// ---------------------------------------------------------------------------
+
+function UpdateToast() {
+  const [info, setInfo] = useState<{ version: string } | null>(null);
+
+  useEffect(() => {
+    window.electronAPI?.onUpdateDownloaded((data) => setInfo(data));
+  }, []);
+
+  if (!info) return null;
+
+  return (
+    <div className="fixed bottom-4 right-4 z-50 flex items-center gap-3 bg-surface-1 border border-accent-purple rounded-lg shadow-xl px-4 py-3 text-sm">
+      <span className="text-gray-200">
+        TwitchIDS <span className="text-accent-purple font-mono">{info.version}</span> ready
+      </span>
+      <button
+        onClick={() => window.electronAPI?.installUpdate()}
+        className="bg-accent-purple hover:bg-purple-600 text-white text-xs font-semibold px-3 py-1 rounded transition-colors"
+      >
+        Restart &amp; Update
+      </button>
+      <button
+        onClick={() => setInfo(null)}
+        className="text-gray-500 hover:text-gray-300 text-xs"
+        title="Dismiss — update will install on next quit"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
 export default function App() {
   useBackend();
 
@@ -640,5 +675,10 @@ export default function App() {
     );
   }
 
-  return <Dashboard port={backendConfig.port} ipcSecret={backendConfig.ipcSecret} />;
+  return (
+    <>
+      <Dashboard port={backendConfig.port} ipcSecret={backendConfig.ipcSecret} />
+      <UpdateToast />
+    </>
+  );
 }
