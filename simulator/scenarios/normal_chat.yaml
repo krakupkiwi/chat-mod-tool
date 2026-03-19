@@ -1,0 +1,13 @@
+name: Normal Chat
+description: >
+  Simulates a healthy channel with 100 organic viewers chatting naturally.
+  Should produce health score >= 80 throughout.
+
+normal_users:
+  count: 100
+  msgs_per_minute: 2.0
+
+spam_bots:
+  count: 0
+
+bot_networks: []

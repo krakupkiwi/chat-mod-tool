@@ -1,0 +1,19 @@
+name: 5000 msg/min Stress Test
+description: >
+  High-volume stress test: 200 organic users at 10 msg/min each + 300 bots
+  = ~5000 msg/min total. Tests performance targets and detection at volume.
+
+normal_users:
+  count: 200
+  msgs_per_minute: 10.0
+
+spam_bots:
+  count: 150
+  msgs_per_minute: 10.0
+  variation_rate: 0.15
+
+bot_networks:
+  - bot_count: 150
+    burst_interval: 2.0
+    jitter_seconds: 0.3
+    username_prefix: viewer

@@ -1,0 +1,59 @@
+# Core runtime
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# Twitch
+twitchio==3.2.0
+httpx==0.28.1
+
+# Database
+aiosqlite==0.20.0
+duckdb==1.1.3
+
+# Storage / security
+keyring==25.5.0
+# cryptography is optional — only needed if a token exceeds 400 chars (rare).
+# Install manually if required: pip install cryptography
+
+# Caching
+cachetools==5.5.0
+
+# Detection algorithms — core
+datasketch==1.6.5
+sentence-transformers==3.3.1
+onnxruntime==1.20.1
+optimum[onnxruntime]==1.23.3
+scikit-learn==1.6.0
+networkx==3.4.2
+
+# Phase 9 additions
+# 9-A: Known bot registry — Bloom filter for 12M+ usernames (~22MB vs ~900MB frozenset)
+pybloom-live==4.0.0
+
+# 9-C: Aho-Corasick spam pattern matching
+pyahocorasick==2.1.1
+
+# 9-E/F: Online anomaly detection + drift detection
+river==0.21.2
+
+# 9-G: Faster ONNX embedding inference (fastembed preferred over manual ONNX export)
+# Falls back to sentence-transformers automatically if not installed or offline.
+fastembed==0.4.2
+
+# 9-H: igraph community detection (C-backed, 15x faster than networkx for Louvain/Infomap)
+igraph==0.11.8
+
+# Utilities
+python-dotenv==1.0.1
+structlog==24.4.0
+pywin32==311
+psutil==6.1.1
+# Fast non-cryptographic hash for content deduplication (3-5x faster than MD5)
+xxhash==3.5.0
+
+# Dev only
+pytest==8.3.4
+pytest-asyncio==0.24.0
+ruff==0.8.4

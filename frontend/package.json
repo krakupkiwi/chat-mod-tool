@@ -1,0 +1,75 @@
+{
+  "name": "twitch-ids",
+  "version": "0.1.0",
+  "description": "Twitch Chat Intrusion Detection System",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "dev:electron": "concurrently \"vite\" \"electron .\"",
+    "build": "vite build",
+    "build:electron": "npm run build && electron-builder --win",
+    "preview": "vite preview",
+    "lint": "eslint src --ext ts,tsx"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "graphology": "^0.26.0",
+    "graphology-layout": "^0.6.1",
+    "graphology-layout-forceatlas2": "^0.10.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-window": "^1.8.10",
+    "recharts": "^2.13.3",
+    "sigma": "^3.0.2",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/react-window": "^1.8.8",
+    "@vitejs/plugin-react": "^5.1.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.0",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "postcss": "^8.4.49",
+    "rollup-plugin-visualizer": "^5.12.0",
+    "tailwindcss": "^3.4.15",
+    "typescript": "^5.6.3",
+    "vite": "^7.3.1"
+  },
+  "build": {
+    "appId": "com.twitchids.app",
+    "productName": "TwitchIDS",
+    "directories": {
+      "output": "../dist"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "extraResources": [
+        {
+          "from": "../dist-python/",
+          "to": "python-backend/",
+          "filter": [
+            "**/*"
+          ]
+        },
+        {
+          "from": "assets/tray/",
+          "to": "assets/tray/",
+          "filter": [
+            "*.png"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}

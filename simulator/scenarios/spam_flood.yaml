@@ -1,0 +1,16 @@
+name: Spam Flood
+description: >
+  50 organic viewers + 40 spam bots sending identical messages at 20 msg/min each.
+  Targets duplicate_ratio and temporal_sync detectors.
+  Expected: health score drops below 40 within 5 seconds.
+
+normal_users:
+  count: 50
+  msgs_per_minute: 2.0
+
+spam_bots:
+  count: 40
+  msgs_per_minute: 20.0
+  variation_rate: 0.05   # Mostly identical messages
+
+bot_networks: []

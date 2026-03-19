@@ -1,0 +1,43 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+*.egg-info/
+dist-python/
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+# NEVER commit real .env files — use .env.example as the template.
+.env
+.env.*
+!.env.example
+
+# ── Node / Electron ───────────────────────────────────────────────────────────
+node_modules/
+dist/
+out/
+.vite/
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Large / generated data files ─────────────────────────────────────────────
+# ML model weights — downloaded automatically at first run via fastembed / HuggingFace
+models/
+
+# Simulator output and any JSONL dumps — development artefacts, not source
+*.jsonl
+
+# ── Development artefacts ─────────────────────────────────────────────────────
+screenshots/
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Claude Code local settings ────────────────────────────────────────────────
+# settings.local.json may contain machine-specific paths and development secrets.
+# CLAUDE.md (project instructions) is intentionally committed.
+.claude/

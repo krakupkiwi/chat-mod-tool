@@ -1,0 +1,9 @@
+# Normalize line endings to LF in the repository.
+# Windows developers get CRLF on checkout via core.autocrlf.
+* text=auto eol=lf
+
+# Binary files — no line ending conversion
+*.png binary
+*.ico binary
+*.icns binary
+*.wasm binary
