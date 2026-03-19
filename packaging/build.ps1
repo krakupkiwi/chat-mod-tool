@@ -196,6 +196,9 @@ $outDir      = Join-Path $ProjectRoot "dist"
 Push-Location $frontendDir
 try {
     $env:ELECTRON_BUILDER_VERSION = $Version
+    # No code-signing certificate -- skip signing to avoid winCodeSign download
+    $env:CSC_IDENTITY_AUTO_DISCOVERY = "false"
+    $env:WIN_CSC_LINK = ""
     & npm run build:electron -- --win nsis
     if ($LASTEXITCODE -ne 0) { Write-Fail "electron-builder failed (exit $LASTEXITCODE)" }
 } finally {
