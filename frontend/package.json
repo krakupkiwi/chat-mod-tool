@@ -1,6 +1,6 @@
 {
   "name": "twitch-ids",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Twitch Chat Intrusion Detection System",
   "main": "electron/main.js",
   "scripts": {
