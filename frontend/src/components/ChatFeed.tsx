@@ -161,8 +161,10 @@ function ChatRow({ msg, onSelectUser }: RowProps) {
 // Feed
 // ---------------------------------------------------------------------------
 
-// Only render the most recent N messages to keep DOM size bounded.
-const RENDER_CAP = 150;
+// Messages rendered in the DOM while live (keep DOM tight for performance).
+const RENDER_CAP_LIVE = 250;
+// Messages rendered while paused (user can scroll back through history).
+const RENDER_CAP_PAUSED = 600;
 
 export function ChatFeed() {
   const allMessages = useChatStore((s) => s.messages);
@@ -189,28 +191,34 @@ export function ChatFeed() {
   // How many new messages arrived while paused
   const newCount = paused ? Math.max(0, messages.length - pausedAtLengthRef.current) : 0;
 
-  // What's rendered — live slice when playing, frozen slice when paused
+  // What's rendered — live slice when playing, larger frozen slice when paused
   const visible = paused
-    ? messages.slice(Math.max(0, pausedAtLengthRef.current - RENDER_CAP), pausedAtLengthRef.current)
-    : messages.slice(-RENDER_CAP);
+    ? messages.slice(Math.max(0, pausedAtLengthRef.current - RENDER_CAP_PAUSED), pausedAtLengthRef.current)
+    : messages.slice(-RENDER_CAP_LIVE);
 
-  // Scroll to bottom whenever a new message arrives and we are not paused
+  // Scroll to bottom on new messages — but check position first so we don't
+  // override a scroll the user has already started. At high volume this effect
+  // fires many times per second; if the user has scrolled up we pause here
+  // rather than forcing them back to the bottom.
   useEffect(() => {
     if (pausedRef.current) return;
     const el = scrollRef.current;
     if (!el) return;
-    // Only flag if we'll actually move — if already at bottom no scroll event fires
-    // and the flag would stay set, blocking the user's next scroll.
-    if (el.scrollHeight - el.scrollTop - el.clientHeight > 1) {
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    // User has scrolled up — set pause instead of fighting their scroll
+    if (distFromBottom > 100) {
+      pausedRef.current = true;
+      pausedAtLengthRef.current = Math.max(0, messagesLengthRef.current - 1);
+      setPaused(true);
+      return;
+    }
+    if (distFromBottom > 1) {
       programmaticRef.current = true;
     }
     el.scrollTop = el.scrollHeight;
   }, [messages.length]);
 
   const onScroll = useCallback(() => {
-    // Consume the flag on the scroll event it was set for, not via rAF.
-    // rAF fires between message arrivals under heavy load, leaving the flag true
-    // while the user's scroll event fires — causing their scroll to be silently ignored.
     if (programmaticRef.current) {
       programmaticRef.current = false;
       return;

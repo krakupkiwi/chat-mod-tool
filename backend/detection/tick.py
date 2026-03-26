@@ -18,9 +18,12 @@ All methods access `self` attributes defined in DetectionEngine.__init__.
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import logging
 import time
 from typing import TYPE_CHECKING
+
+import aiosqlite
 
 from core.telemetry import telemetry
 
@@ -248,6 +251,20 @@ class TickMixin:
         )
         snapshot = self.anomaly_detector.evaluate(snapshot)
 
+        # Persist health level transitions for the History page
+        _prev_level = getattr(self, "_last_health_level", None)
+        if _prev_level is not None and _prev_level != snapshot.level:
+            asyncio.create_task(
+                self._persist_escalation(
+                    _prev_level,
+                    snapshot.level,
+                    snapshot.health_score,
+                    snapshot.messages_per_minute,
+                ),
+                name="persist_escalation",
+            )
+        self._last_health_level = snapshot.level
+
         # Drift detection (slow-ramp campaigns)
         drift_result: DriftResult = self.health_drift.update(
             mpm=snapshot.messages_per_minute,
@@ -333,6 +350,37 @@ class TickMixin:
             logger.error("SemanticClusterer error: %s", e)
             return
         self._last_cluster_result = result
+
+        # Persist detected clusters to the history DB (fire-and-forget)
+        if result.clusters:
+            now_ts = time.time()
+            channel = settings.default_channel or ""
+            rows = [
+                (
+                    now_ts,
+                    c.get("channel") or channel,
+                    c["cluster_id"],
+                    c["size"],
+                    c.get("sample_message"),
+                    _json.dumps(c["user_ids"]),
+                    result.risk_score,
+                )
+                for c in result.clusters
+            ]
+            try:
+                async with aiosqlite.connect(settings.db_path) as db:
+                    await db.executemany(
+                        """
+                        INSERT INTO cluster_events
+                            (detected_at, channel, cluster_id, member_count,
+                             sample_message, user_ids, risk_score)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        rows,
+                    )
+                    await db.commit()
+            except Exception as exc:
+                logger.warning("Failed to persist cluster events: %s", exc)
 
         # Run cross-cluster bot network detection (igraph Infomap) in the same
         # thread pool as the semantic clusterer — Infomap is CPU-bound (O(n²) edge
@@ -525,3 +573,25 @@ class TickMixin:
                 "reason": drift.reason if drift else "",
             },
         }
+
+    # ------------------------------------------------------------------
+    # History persistence helpers (fire-and-forget)
+    # ------------------------------------------------------------------
+
+    async def _persist_escalation(
+        self, from_level: str, to_level: str, health_score: float, mpm: float
+    ) -> None:
+        channel = settings.default_channel or ""
+        try:
+            async with aiosqlite.connect(settings.db_path) as db:
+                await db.execute(
+                    """
+                    INSERT INTO health_escalation_events
+                        (occurred_at, channel, from_level, to_level, health_score, msg_per_min)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (time.time(), channel, from_level, to_level, health_score, mpm),
+                )
+                await db.commit()
+        except Exception as exc:
+            logger.warning("Failed to persist escalation event: %s", exc)

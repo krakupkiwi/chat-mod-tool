@@ -164,6 +164,7 @@ async def get_config() -> AppConfig:
         timeout_threshold=settings.timeout_threshold,
         ban_threshold=settings.ban_threshold,
         alert_threshold=settings.alert_threshold,
+        emote_filter_sensitivity=settings.emote_filter_sensitivity,
         default_channel=settings.default_channel,
         message_retention_days=settings.message_retention_days,
         health_history_retention_days=settings.health_history_retention_days,
@@ -188,6 +189,9 @@ async def update_config(request: UpdateConfigRequest) -> AppConfig:
         settings.ban_threshold = request.ban_threshold
     if request.alert_threshold is not None:
         settings.alert_threshold = request.alert_threshold
+    if request.emote_filter_sensitivity is not None:
+        settings.emote_filter_sensitivity = request.emote_filter_sensitivity
+        logger.info("Emote filter sensitivity: %d", settings.emote_filter_sensitivity)
     if request.default_channel is not None:
         channel = request.default_channel.lstrip("#").strip()
         settings.default_channel = channel

@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     ban_threshold: float = 95.0         # Confidence score to trigger ban (also requires dual signal)
     alert_threshold: float = 60.0       # Confidence score for dashboard alert
 
+    # Detection behaviour
+    emote_filter_sensitivity: int = Field(default=50, ge=0, le=100)
+    # 0 = filter off; 1–100 maps to emote-ratio threshold 1.0→0.40.
+    # At default 50 any message where ≥70% of tokens are Twitch emotes/emoji
+    # is treated like a short reaction and excluded from similarity detectors.
+
     # Data retention — 0 means keep forever
     message_retention_days: int = 7
     health_history_retention_days: int = 30

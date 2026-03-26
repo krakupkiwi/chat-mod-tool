@@ -20,8 +20,10 @@ export function useWebSocket(port: number | null, ipcSecret: string | null) {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unmounted = useRef(false);
 
-  const { setWsState, addMessage, clearMessages, setHealth, setResponseState, addAlert, setTwitchConnected, addModerationAction, setPerf, addChannelEvent, addAutomodHeld } = useChatStore();
+  const { setWsState, addMessage, clearMessages, setHealth, setResponseState, addAlert, setTwitchConnected, addModerationAction, setPerf, addChannelEvent, addAutomodHeld, addEventLogEntry } = useChatStore();
   const currentChannelRef = useRef<string | null>(null);
+  const prevLevelRef = useRef<string>('healthy');
+  const seenClusterIds = useRef<Set<string>>(new Set());
 
   const connect = useCallback(() => {
     if (!port || !ipcSecret || unmounted.current) return;
@@ -149,6 +151,38 @@ export function useWebSocket(port: number | null, ipcSecret: string | null) {
           };
           setHealth(snapshot);
 
+          // Log health escalations (suspicious or worse)
+          const LEVEL_RANK: Record<string, number> = { healthy: 0, elevated: 1, suspicious: 2, likely_attack: 3, critical: 4 };
+          const prevRank = LEVEL_RANK[prevLevelRef.current] ?? 0;
+          const newRank = LEVEL_RANK[snapshot.level] ?? 0;
+          if (newRank > prevRank && newRank >= 2) {
+            addEventLogEntry({
+              id: String(Math.random()),
+              type: 'health_escalation',
+              timestamp: Date.now() / 1000,
+              fromLevel: prevLevelRef.current,
+              toLevel: snapshot.level,
+            });
+          }
+          prevLevelRef.current = snapshot.level;
+
+          // Log newly detected clusters
+          for (const cluster of snapshot.clusters) {
+            if (!seenClusterIds.current.has(cluster.cluster_id)) {
+              seenClusterIds.current.add(cluster.cluster_id);
+              addEventLogEntry({
+                id: String(Math.random()),
+                type: 'cluster',
+                timestamp: Date.now() / 1000,
+                channel: cluster.channel,
+                clusterSize: cluster.size,
+                clusterSample: cluster.sample_message,
+                clusterId: cluster.cluster_id,
+                userIds: cluster.user_ids,
+              });
+            }
+          }
+
           // Push health level to Electron main for tray icon + notifications
           window.electronAPI?.sendTrayUpdate(snapshot.score, snapshot.level);
         }
@@ -195,6 +229,16 @@ export function useWebSocket(port: number | null, ipcSecret: string | null) {
           sessionFlagCount: 1, // addAlert will increment this if the user is already in the list
         };
         addAlert(alert);
+        addEventLogEntry({
+          id: `threat_${alert.id}`,
+          type: 'threat',
+          timestamp: alert.timestamp,
+          channel: String(data.channel ?? ''),
+          username: alert.username,
+          userId: alert.userId,
+          severity: alert.severity,
+          description: alert.description,
+        });
         break;
       }
 
@@ -254,7 +298,7 @@ export function useWebSocket(port: number | null, ipcSecret: string | null) {
         break;
       }
     }
-  }, [addMessage, clearMessages, setHealth, setResponseState, addAlert, setTwitchConnected, addModerationAction, setPerf, addChannelEvent, addAutomodHeld]);
+  }, [addMessage, clearMessages, setHealth, setResponseState, addAlert, setTwitchConnected, addModerationAction, setPerf, addChannelEvent, addAutomodHeld, addEventLogEntry]);
 
   const scheduleReconnect = useCallback(() => {
     if (unmounted.current) return;

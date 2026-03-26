@@ -19,7 +19,7 @@ import asyncio
 import logging
 import os
 import random
-from collections import defaultdict
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -104,17 +104,37 @@ class SemanticClusterer:
         """
         Return True for messages that look like viewer reactions.
 
-        Mirrors DetectionEngine._is_short_reaction(): short text with no URLs
-        or @mentions.  These are excluded from semantic clustering because MiniLM
-        embeds "lol", "lmao", "PogChamp", and similar single-emote messages to
-        nearly identical vectors, causing every emote wave to appear as a cluster.
+        Two criteria, either is sufficient:
+          1. Short text (<=3 words or <=25 chars) with no URLs/@mentions --
+             mirrors DetectionEngine._is_short_reaction().
+          2. Predominantly Twitch emotes/emoji -- checked against the current
+             emote_filter_sensitivity setting.  If the setting is 0 this check
+             is skipped entirely.
+
+        Both categories are excluded from semantic clustering because MiniLM
+        embeds emote-wave messages to nearly identical vectors, causing every
+        mass emote reaction to appear as a suspicious cluster.
         """
         if getattr(msg, "url_count", 0) > 0 or getattr(msg, "mention_count", 0) > 0:
             return False
-        return (
+        # Criterion 1: short reaction
+        if (
             getattr(msg, "word_count", 999) <= _REACTION_MAX_WORDS
             or getattr(msg, "char_count", 999) <= _REACTION_MAX_CHARS
-        )
+        ):
+            return True
+        # Criterion 2: emote-heavy
+        from core.config import settings as _settings
+        if _settings.emote_filter_sensitivity > 0:
+            from detection.fast.emote_filter import emote_ratio, sensitivity_to_threshold
+            ratio = emote_ratio(
+                getattr(msg, "raw_text", ""),
+                getattr(msg, "emoji_count", 0),
+                getattr(msg, "word_count", 0),
+            )
+            if ratio >= sensitivity_to_threshold(_settings.emote_filter_sensitivity):
+                return True
+        return False
 
     async def analyze(self, messages: list["ChatMessage"]) -> ClusterResult:
         """Non-blocking: runs DBSCAN in thread pool."""
@@ -178,23 +198,28 @@ class SemanticClusterer:
             algorithm="brute",
         ).fit_predict(embeddings)
 
+        msg_channels = [m.channel for m in messages]
         cluster_users: dict[int, list[str]] = defaultdict(list)
         cluster_msgs: dict[int, list[str]] = defaultdict(list)
+        cluster_chans: dict[int, list[str]] = defaultdict(list)
         for idx, label in enumerate(labels):
             if label >= 0:
                 cluster_users[int(label)].append(user_ids[idx])
                 cluster_msgs[int(label)].append(contents[idx])
+                cluster_chans[int(label)].append(msg_channels[idx])
 
         clusters = []
         for cid, users in cluster_users.items():
             distinct = list(set(users))
             if len(distinct) >= MIN_CLUSTER_MEMBERS:
+                dominant_channel = Counter(cluster_chans[cid]).most_common(1)[0][0]
                 clusters.append(
                     {
                         "cluster_id": f"sem_{cid}",
                         "user_ids": distinct,
                         "size": len(distinct),
                         "sample_message": cluster_msgs[cid][0],
+                        "channel": dominant_channel,
                     }
                 )
 

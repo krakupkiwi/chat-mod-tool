@@ -170,6 +170,32 @@ CREATE TABLE IF NOT EXISTS lockdown_profiles (
     followers_only          INTEGER,
     followers_only_duration INTEGER    -- minutes (0=any follower); only if followers_only=1
 );
+
+CREATE TABLE IF NOT EXISTS cluster_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    detected_at     REAL    NOT NULL,
+    channel         TEXT    NOT NULL,
+    cluster_id      TEXT    NOT NULL,
+    member_count    INTEGER NOT NULL,
+    sample_message  TEXT,
+    user_ids        TEXT    NOT NULL,  -- JSON array of user IDs
+    risk_score      REAL    NOT NULL DEFAULT 0.0
+);
+
+CREATE INDEX IF NOT EXISTS idx_cluster_events_detected_at ON cluster_events(detected_at);
+CREATE INDEX IF NOT EXISTS idx_cluster_events_channel      ON cluster_events(channel);
+
+CREATE TABLE IF NOT EXISTS health_escalation_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    occurred_at     REAL    NOT NULL,
+    channel         TEXT    NOT NULL,
+    from_level      TEXT    NOT NULL,
+    to_level        TEXT    NOT NULL,
+    health_score    REAL    NOT NULL,
+    msg_per_min     REAL    NOT NULL DEFAULT 0.0
+);
+
+CREATE INDEX IF NOT EXISTS idx_health_escalation_events_occurred_at ON health_escalation_events(occurred_at);
 """
 
 

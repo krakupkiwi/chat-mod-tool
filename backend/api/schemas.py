@@ -54,6 +54,7 @@ class AppConfig(BaseModel):
     timeout_threshold: float
     ban_threshold: float
     alert_threshold: float
+    emote_filter_sensitivity: int
     default_channel: str
     message_retention_days: int
     health_history_retention_days: int
@@ -68,6 +69,7 @@ class UpdateConfigRequest(BaseModel):
     timeout_threshold: float | None = Field(default=None, ge=30.0, le=100.0)
     ban_threshold: float | None = Field(default=None, ge=50.0, le=100.0)
     alert_threshold: float | None = Field(default=None, ge=20.0, le=100.0)
+    emote_filter_sensitivity: int | None = Field(default=None, ge=0, le=100)
     default_channel: str | None = Field(
         default=None,
         max_length=64,

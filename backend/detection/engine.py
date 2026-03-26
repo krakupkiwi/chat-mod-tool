@@ -48,6 +48,7 @@ from detection.batch.clustering import ClusterResult, SemanticClusterer
 from detection.batch.cooccurrence import CooccurrenceDetector, CooccurrenceResult
 from detection.batch.river_anomaly import AccountFeatureVector, RiverAnomalyScorer
 from detection.fast.burst import BurstAnomalyDetector
+from detection.fast.emote_filter import emote_ratio, sensitivity_to_threshold
 from detection.fast.duplicate import IncrementalDuplicateTracker
 from detection.fast.minhash import MinHashDuplicateDetector
 from detection.fast.pattern_match import SpamPatternMatcher
@@ -180,6 +181,24 @@ class DetectionEngine(TickMixin, AlertingMixin):
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _is_emote_heavy(msg: "ChatMessage", sensitivity: int) -> bool:
+        """
+        Return True when the message is predominantly Twitch emotes/emoji and
+        the emote filter sensitivity is non-zero.
+
+        Emote-heavy messages are treated identically to short reactions for the
+        purpose of similarity detectors (duplicate_tracker, temporal_sync,
+        MinHash).  They still accumulate rate, username, account-age, and
+        pattern signals — a bot account that spams emotes can still be flagged
+        by those.
+        """
+        if sensitivity <= 0 or msg.url_count > 0 or msg.mention_count > 0:
+            return False
+        threshold = sensitivity_to_threshold(sensitivity)
+        ratio = emote_ratio(msg.raw_text, msg.emoji_count, msg.word_count)
+        return ratio >= threshold
+
+    @staticmethod
     def _is_short_reaction(msg: "ChatMessage") -> bool:
         """
         Return True for messages that look like viewer reactions rather than
@@ -211,9 +230,14 @@ class DetectionEngine(TickMixin, AlertingMixin):
         ts = msg.received_at
         uid = msg.user_id
 
-        # Determine whether this looks like a viewer reaction (short, no links/mentions).
-        # If so, skip similarity detectors to prevent emote-wave false positives.
-        skip_similarity = self._is_short_reaction(msg)
+        # Determine whether this looks like a viewer reaction (short, no links/mentions)
+        # OR is predominantly Twitch emotes/emoji.  Either condition skips similarity
+        # detectors to prevent emote-wave false positives.
+        from core.config import settings as _settings
+        skip_similarity = (
+            self._is_short_reaction(msg)
+            or self._is_emote_heavy(msg, _settings.emote_filter_sensitivity)
+        )
 
         # 1. Duplicate tracker — check BEFORE adding so we can record per-user
         #    participation.  A user who repeatedly sends the same text is likely a bot;

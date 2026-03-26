@@ -31,6 +31,7 @@ interface Config {
   timeout_threshold: number;
   ban_threshold: number;
   alert_threshold: number;
+  emote_filter_sensitivity: number;
   default_channel: string;
   message_retention_days: number;
   health_history_retention_days: number;
@@ -977,6 +978,24 @@ export const SettingsDrawer = memo(function SettingsDrawer({ port, ipcSecret, op
                 max={100}
                 onChange={(v) => update('ban_threshold', v)}
               />
+
+              {/* Detection behaviour */}
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-4 mb-1">Detection</div>
+
+              <div className="py-2.5 border-b border-surface-3">
+                <SliderField
+                  label="Emote spam filter"
+                  value={config.emote_filter_sensitivity}
+                  min={0}
+                  max={100}
+                  onChange={(v) => update('emote_filter_sensitivity', v)}
+                />
+                <p className="text-xs text-gray-600 mt-1">
+                  {config.emote_filter_sensitivity === 0
+                    ? 'Off — emote-heavy messages scored normally.'
+                    : `Messages where ≥${Math.round(Math.max(40, 100 - config.emote_filter_sensitivity * 0.6))}% of tokens are emotes/emoji are excluded from similarity detectors. Twitch emote waves (PogChamp, LUL, etc.) won't trigger cluster or spam alerts.`}
+                </p>
+              </div>
 
               {/* Warning when live moderation is active */}
               {!config.dry_run && (config.auto_timeout_enabled || config.auto_ban_enabled) && (

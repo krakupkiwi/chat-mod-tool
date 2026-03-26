@@ -96,6 +96,11 @@ interface Props {
 export function BotNetworkGraph({ clusters }: Props) {
   const messages = useChatStore((s) => s.messages);
   const setSelectedUser = useChatStore((s) => s.setSelectedUser);
+  const activeChannel = useChatStore((s) => s.activeChannel);
+
+  const visible = activeChannel
+    ? clusters.filter((c) => !c.channel || c.channel === activeChannel)
+    : clusters;
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma | null>(null);
 
@@ -106,9 +111,9 @@ export function BotNetworkGraph({ clusters }: Props) {
   }, [messages]);
 
   useEffect(() => {
-    if (!containerRef.current || clusters.length === 0) return;
+    if (!containerRef.current || visible.length === 0) return;
 
-    const graph = buildGraph(clusters, userMap);
+    const graph = buildGraph(visible, userMap);
     if (graph.order === 0) return;
 
     // Destroy any existing renderer
@@ -142,14 +147,14 @@ export function BotNetworkGraph({ clusters }: Props) {
       renderer.kill();
       sigmaRef.current = null;
     };
-  }, [clusters, userMap, setSelectedUser]);
+  }, [visible, userMap, setSelectedUser]);
 
-  if (clusters.length === 0) return null;
+  if (visible.length === 0) return null;
 
   return (
     <div className="px-2 py-2 border-t border-surface-3 overflow-hidden">
       <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1.5 px-1">
-        Bot Network Graph
+        Bot Network Graph{activeChannel ? ` · #${activeChannel}` : ''}
       </div>
       {/* position:relative is required so Sigma's absolutely-positioned canvas
           stays bounded within this container instead of escaping to a distant ancestor. */}
@@ -159,13 +164,15 @@ export function BotNetworkGraph({ clusters }: Props) {
         style={{ height: '160px', position: 'relative' }}
       />
       <div className="flex flex-wrap gap-2 mt-1 px-1">
-        {clusters.slice(0, 6).map((c, ci) => (
+        {visible.slice(0, 6).map((c, ci) => (
           <div key={c.cluster_id} className="flex items-center gap-1">
             <div
               className="w-2 h-2 rounded-full"
               style={{ background: clusterColor(ci) }}
             />
-            <span className="text-[10px] text-gray-600">C{ci + 1} ({c.size})</span>
+            <span className="text-[10px] text-gray-600">
+              C{ci + 1} ({c.size}){c.channel ? ` #${c.channel}` : ''}
+            </span>
           </div>
         ))}
       </div>

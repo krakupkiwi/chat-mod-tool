@@ -43,6 +43,27 @@ export interface ClusterInfo {
   user_ids: string[];
   size: number;
   sample_message: string;
+  channel?: string;
+}
+
+export interface EventLogEntry {
+  id: string;
+  type: 'cluster' | 'health_escalation' | 'threat';
+  timestamp: number;
+  channel?: string;
+  // cluster
+  clusterSize?: number;
+  clusterSample?: string;
+  clusterId?: string;
+  userIds?: string[];
+  // health escalation
+  fromLevel?: string;
+  toLevel?: string;
+  // threat
+  username?: string;
+  userId?: string;
+  severity?: string;
+  description?: string;
 }
 
 export interface HealthSnapshot {
@@ -97,7 +118,7 @@ interface Store {
   wsState: ConnectionState;
   setWsState: (s: ConnectionState) => void;
 
-  // Chat messages (capped at 500 in memory)
+  // Chat messages (capped at 2000 in memory)
   messages: ChatMessage[];
   addMessage: (msg: ChatMessage) => void;
   clearMessages: () => void;
@@ -147,6 +168,11 @@ interface Store {
   // Multi-channel: active filter (null = show all channels)
   activeChannel: string | null;
   setActiveChannel: (ch: string | null) => void;
+
+  // Event log — session history of clusters, health escalations, threats
+  eventLog: EventLogEntry[];
+  addEventLogEntry: (e: EventLogEntry) => void;
+  clearEventLog: () => void;
 
   // Incremented after a data purge or manual refresh — causes data-fetching
   // components (ThreatPanel, WatchlistPanel, etc.) to re-fetch immediately.
@@ -237,7 +263,7 @@ export interface ModerationAction {
   timestamp: number;
 }
 
-const MAX_MESSAGES = 500;
+const MAX_MESSAGES = 2000;
 
 // -------------------------------------------------------------------------
 // Store
@@ -355,6 +381,12 @@ export const useChatStore = create<Store>((set) => ({
   // Active channel filter
   activeChannel: null,
   setActiveChannel: (ch) => set({ activeChannel: ch }),
+
+  // Event log
+  eventLog: [],
+  addEventLogEntry: (e) =>
+    set((state) => ({ eventLog: [e, ...state.eventLog].slice(0, 500) })),
+  clearEventLog: () => set({ eventLog: [] }),
 
   // Data refresh key
   dataRefreshKey: 0,

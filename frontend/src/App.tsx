@@ -21,6 +21,7 @@ import { ChannelEventFeed } from './components/ChannelEventFeed';
 import { ChatInput } from './components/ChatInput';
 import { AutomodQueueWidget } from './components/AutomodQueueWidget';
 import { ChannelBar } from './components/ChannelBar';
+import { EventLog } from './components/EventLog';
 import { LockdownProfilePanel } from './components/LockdownProfilePanel';
 import { BanListImportModal } from './components/BanListImportModal';
 import { DataManagerModal } from './components/DataManagerModal';
@@ -31,6 +32,9 @@ import { WatchlistPanel } from './components/WatchlistPanel';
 
 // Recharts (~450KB) is only needed on the Analytics tab — split it into its own chunk
 const StatsPage = lazy(() => import('./components/StatsPage').then((m) => ({ default: m.StatsPage })));
+
+// HistoryPage lazy-loaded — separate chunk keeps the main bundle small
+const HistoryPage = lazy(() => import('./components/HistoryPage').then((m) => ({ default: m.HistoryPage })));
 
 function ChannelControl({ port, ipcSecret }: { port: number; ipcSecret: string }) {
   const configuredChannel = useChatStore((s) => s.configuredChannel);
@@ -324,7 +328,7 @@ function Dashboard({ port, ipcSecret }: { port: number; ipcSecret: string }) {
   const [dataManagerOpen, setDataManagerOpen] = useState(false);
   const [nukeOpen, setNukeOpen] = useState(false);
   const [followerAuditOpen, setFollowerAuditOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'history'>('dashboard');
   const [refreshing, setRefreshing] = useState(false);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
   const bumpDataRefreshKey = useChatStore((s) => s.bumpDataRefreshKey);
@@ -372,7 +376,7 @@ function Dashboard({ port, ipcSecret }: { port: number; ipcSecret: string }) {
           )}
 
           <div className="flex items-center gap-1 bg-surface-2 rounded p-0.5">
-            {(['dashboard', 'stats'] as const).map((tab) => (
+            {(['dashboard', 'stats', 'history'] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -382,7 +386,7 @@ function Dashboard({ port, ipcSecret }: { port: number; ipcSecret: string }) {
                     : 'text-gray-500 hover:text-gray-300'
                 }`}
               >
-                {tab === 'dashboard' ? 'Dashboard' : 'Analytics'}
+                {tab === 'dashboard' ? 'Dashboard' : tab === 'stats' ? 'Analytics' : 'History'}
               </button>
             ))}
           </div>
@@ -477,6 +481,10 @@ function Dashboard({ port, ipcSecret }: { port: number; ipcSecret: string }) {
           <Suspense fallback={<div className="flex items-center justify-center flex-1 text-gray-400">Loading analytics…</div>}>
             <StatsPage port={port} ipcSecret={ipcSecret} />
           </Suspense>
+        ) : activeTab === 'history' ? (
+          <Suspense fallback={<div className="flex items-center justify-center flex-1 text-gray-400">Loading history…</div>}>
+            <HistoryPage port={port} ipcSecret={ipcSecret} />
+          </Suspense>
         ) : (
           <>
             {/* Chat feed — takes most of the space */}
@@ -511,6 +519,7 @@ function Dashboard({ port, ipcSecret }: { port: number; ipcSecret: string }) {
                   <div className="shrink-0">
                     <BotNetworkGraph clusters={health.clusters} />
                   </div>
+                  <EventLog />
                   <AutomodQueueWidget port={port} ipcSecret={ipcSecret} />
                   <div className="border-t border-surface-3">
                     <ThreatPanel port={port} ipcSecret={ipcSecret} />

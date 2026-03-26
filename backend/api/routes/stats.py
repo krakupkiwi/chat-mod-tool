@@ -18,6 +18,7 @@ import csv
 import io
 import json as _json
 import os
+import re
 import time
 from typing import Optional
 
@@ -29,6 +30,16 @@ from core.config import settings
 from storage.analytics import run_analytics
 
 router = APIRouter()
+
+
+def _chan(channel: Optional[str], col: str = "channel") -> str:
+    """Return a safe SQL AND-clause for an optional channel filter.
+    Twitch channel names are lowercase alphanumeric + underscore only.
+    """
+    if not channel:
+        return ""
+    safe = re.sub(r"[^a-z0-9_]", "", channel.lower())[:25]
+    return f"AND {col} = '{safe}'"
 
 
 @router.get("/stats/health")
@@ -85,7 +96,7 @@ async def session_summary(hours: float = 24):
 
 
 @router.get("/stats/top_threats")
-async def top_threats(limit: int = 20, hours: float = 24):
+async def top_threats(limit: int = 20, hours: float = 24, channel: Optional[str] = Query(default=None)):
     """
     Return the top N users by maximum threat score seen in the last N hours.
     Includes username, max score, number of detections, and most recent signals.
@@ -104,6 +115,7 @@ async def top_threats(limit: int = 20, hours: float = 24):
         MAX(flagged_at)             AS last_seen
     FROM ids.flagged_users
     WHERE flagged_at >= {cutoff}
+    {_chan(channel)}
     GROUP BY user_id, username
     ORDER BY max_score DESC
     LIMIT {limit}
@@ -117,7 +129,7 @@ async def top_threats(limit: int = 20, hours: float = 24):
 
 
 @router.get("/stats/timeline")
-async def health_timeline(hours: float = 24, bucket_minutes: int = 5):
+async def health_timeline(hours: float = 24, bucket_minutes: int = 5, channel: Optional[str] = Query(default=None)):
     """
     Return health score bucketed into N-minute intervals for the last N hours.
     Suitable for longer-range charts (vs /stats/health which returns raw points).
@@ -152,7 +164,7 @@ async def health_timeline(hours: float = 24, bucket_minutes: int = 5):
 # ---------------------------------------------------------------------------
 
 @router.get("/stats/session")
-async def session_report(hours: float = 2):
+async def session_report(hours: float = 2, channel: Optional[str] = Query(default=None)):
     """
     Per-stream session report for the last N hours (default 2, max 48).
     Returns everything needed for the stats page summary card:
@@ -164,25 +176,26 @@ async def session_report(hours: float = 2):
     hours = min(hours, 48)
     cutoff = time.time() - hours * 3600
     mid = cutoff + (hours / 2) * 3600
+    cc = _chan(channel)  # channel clause — health_history excluded (single engine, not per-channel)
 
     summary_q = f"""
     SELECT
-        (SELECT COUNT(*)               FROM ids.messages          WHERE received_at >= {cutoff}) AS total_messages,
-        (SELECT COUNT(DISTINCT user_id) FROM ids.messages          WHERE received_at >= {cutoff}) AS unique_users,
-        (SELECT COUNT(*)               FROM ids.flagged_users      WHERE flagged_at  >= {cutoff}) AS total_flagged,
-        (SELECT COUNT(*)               FROM ids.moderation_actions WHERE created_at  >= {cutoff} AND action_type='ban')     AS total_bans,
-        (SELECT COUNT(*)               FROM ids.moderation_actions WHERE created_at  >= {cutoff} AND action_type='timeout') AS total_timeouts,
-        (SELECT ROUND(AVG(health_score),1) FROM ids.health_history WHERE recorded_at >= {cutoff})       AS avg_health,
-        (SELECT ROUND(MIN(health_score),1) FROM ids.health_history WHERE recorded_at >= {cutoff})       AS min_health,
-        (SELECT ROUND(MAX(health_score),1) FROM ids.health_history WHERE recorded_at >= {cutoff})       AS max_health,
+        (SELECT COUNT(*)               FROM ids.messages          WHERE received_at >= {cutoff} {cc}) AS total_messages,
+        (SELECT COUNT(DISTINCT user_id) FROM ids.messages          WHERE received_at >= {cutoff} {cc}) AS unique_users,
+        (SELECT COUNT(*)               FROM ids.flagged_users      WHERE flagged_at  >= {cutoff} {cc}) AS total_flagged,
+        (SELECT COUNT(*)               FROM ids.moderation_actions WHERE created_at  >= {cutoff} {cc} AND action_type='ban')     AS total_bans,
+        (SELECT COUNT(*)               FROM ids.moderation_actions WHERE created_at  >= {cutoff} {cc} AND action_type='timeout') AS total_timeouts,
+        (SELECT ROUND(AVG(health_score),1) FROM ids.health_history WHERE recorded_at >= {cutoff})                         AS avg_health,
+        (SELECT ROUND(MIN(health_score),1) FROM ids.health_history WHERE recorded_at >= {cutoff})                         AS min_health,
+        (SELECT ROUND(MAX(health_score),1) FROM ids.health_history WHERE recorded_at >= {cutoff})                         AS max_health,
         (SELECT ROUND(AVG(health_score),1) FROM ids.health_history WHERE recorded_at >= {cutoff} AND recorded_at < {mid}) AS first_half_health,
-        (SELECT ROUND(AVG(health_score),1) FROM ids.health_history WHERE recorded_at >= {mid})          AS second_half_health
+        (SELECT ROUND(AVG(health_score),1) FROM ids.health_history WHERE recorded_at >= {mid})                            AS second_half_health
     """
 
     top_q = f"""
     SELECT username, ROUND(MAX(threat_score),1) AS max_score, COUNT(*) AS detections
     FROM ids.flagged_users
-    WHERE flagged_at >= {cutoff}
+    WHERE flagged_at >= {cutoff} {cc}
     GROUP BY user_id, username
     ORDER BY max_score DESC
     LIMIT 5
@@ -195,7 +208,7 @@ async def session_report(hours: float = 2):
     FROM (
         SELECT UNNEST(json_extract(signals, '$[*]')::VARCHAR[]) AS signal
         FROM ids.flagged_users
-        WHERE flagged_at >= {cutoff}
+        WHERE flagged_at >= {cutoff} {cc}
     )
     GROUP BY signal
     ORDER BY count DESC
@@ -216,6 +229,54 @@ async def session_report(hours: float = 2):
         result["top_threats"] = top_users
         result["top_signals"] = top_signals
         return result
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Watchlist activity
+# ---------------------------------------------------------------------------
+
+@router.get("/stats/watchlist_activity")
+async def watchlist_activity(hours: float = 2, channel: Optional[str] = Query(default=None)):
+    """
+    Return all watchlist users enriched with their flag count and max threat
+    score within the requested time window.  Users with recent flags appear
+    first; within the same flag count, high-priority users are listed before
+    normal ones.
+    """
+    hours = min(hours, 168)
+    cutoff = time.time() - hours * 3600
+    # Channel filter applies to flagged_users join only (watchlist has no channel col)
+    ch_join = _chan(channel, col="f.channel").replace("AND ", "AND ") if channel else ""
+
+    query = f"""
+    SELECT
+        w.user_id,
+        w.username,
+        w.note,
+        w.priority,
+        w.added_at,
+        COUNT(f.id)                   AS flag_count,
+        ROUND(MAX(f.threat_score), 1) AS max_score,
+        MAX(f.flagged_at)             AS last_flagged,
+        MAX(f.signals)                AS last_signals
+    FROM ids.user_watchlist w
+    LEFT JOIN ids.flagged_users f
+        ON  f.user_id    = w.user_id
+        AND f.flagged_at >= {cutoff}
+        AND f.channel   != '__sim__'
+        {ch_join}
+    GROUP BY w.user_id, w.username, w.note, w.priority, w.added_at
+    ORDER BY
+        flag_count DESC,
+        CASE WHEN w.priority = 'high' THEN 0 ELSE 1 END,
+        w.added_at DESC
+    """
+
+    try:
+        rows = await asyncio.to_thread(run_analytics, settings.db_path, query)
+        return {"users": rows, "hours": hours}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -321,7 +382,10 @@ async def data_info() -> dict:
     except OSError:
         db_size = 0
 
-    counts: dict = {"flagged_users": [], "moderation_actions": [], "messages": []}
+    counts: dict = {
+        "flagged_users": [], "moderation_actions": [], "messages": [],
+        "cluster_events": [], "health_escalation_events": [],
+    }
 
     try:
         async with aiosqlite.connect(db_path) as db:
@@ -331,6 +395,8 @@ async def data_info() -> dict:
                 ("flagged_users", "flagged_at"),
                 ("moderation_actions", "created_at"),
                 ("messages", "received_at"),
+                ("cluster_events", "detected_at"),
+                ("health_escalation_events", "occurred_at"),
             ]:
                 async with db.execute(
                     f"""
@@ -355,10 +421,12 @@ async def data_info() -> dict:
 
 # Table config: name → timestamp column
 _PURGEABLE_TABLES = {
-    "messages":           "received_at",
-    "flagged_users":      "flagged_at",
-    "moderation_actions": "created_at",
-    "health_history":     "recorded_at",
+    "messages":                  "received_at",
+    "flagged_users":             "flagged_at",
+    "moderation_actions":        "created_at",
+    "health_history":            "recorded_at",
+    "cluster_events":            "detected_at",
+    "health_escalation_events":  "occurred_at",
 }
 
 

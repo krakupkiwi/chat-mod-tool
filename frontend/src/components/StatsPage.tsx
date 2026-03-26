@@ -4,12 +4,15 @@
  * Shows:
  *   - Session summary card (messages, users, flags, actions, health)
  *   - Health trend indicator
- *   - Top threats table
+ *   - Health over time chart
+ *   - Suspected users (top threats — enriched with signals + last seen)
+ *   - Watchlist activity (watchlisted users with flag data for the window)
  *   - Most triggered signals
  *   - CSV export buttons
  */
 
 import { useEffect, useState } from 'react';
+import { useChatStore } from '../store/chatStore';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -47,12 +50,41 @@ interface TimelinePoint {
   avg_active_users: number;
 }
 
+interface ThreatUser {
+  user_id: string;
+  username: string;
+  max_score: number;
+  detections: number;
+  last_signals: string | null;  // JSON array string
+  last_seen: number | null;     // unix timestamp
+}
+
+interface WatchlistEntry {
+  user_id: string;
+  username: string;
+  note: string;
+  priority: 'high' | 'normal';
+  added_at: number;
+  flag_count: number;
+  max_score: number | null;
+  last_flagged: number | null;
+  last_signals: string | null;  // JSON array string
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function formatTs(ts: number): string {
   return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function timeAgo(ts: number): string {
+  const diff = Math.floor(Date.now() / 1000 - ts);
+  if (diff < 60)  return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
 }
 
 function trendLabel(trend: number | null): { text: string; color: string } {
@@ -67,6 +99,22 @@ function scoreColor(score: number): string {
   if (score >= 60) return 'text-orange-400';
   if (score >= 40) return 'text-yellow-400';
   return 'text-gray-400';
+}
+
+function scoreBg(score: number): string {
+  if (score >= 75) return 'bg-red-900/30 border-red-700/40 text-red-400';
+  if (score >= 60) return 'bg-orange-900/30 border-orange-700/40 text-orange-400';
+  if (score >= 40) return 'bg-yellow-900/30 border-yellow-700/40 text-yellow-400';
+  return 'bg-surface-3 border-surface-3 text-gray-500';
+}
+
+function parseSignals(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw) as string[];
+  } catch {
+    return [];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +137,14 @@ function SectionHeader({ title }: { title: string }) {
   );
 }
 
+function SignalTag({ name }: { name: string }) {
+  return (
+    <span className="bg-surface-3 border border-surface-3 text-yellow-300 rounded px-1.5 py-0.5 text-[10px] font-mono">
+      {name}
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -108,38 +164,77 @@ const TIME_RANGES = [
 ] as const;
 
 export function StatsPage({ port, ipcSecret }: Props) {
-  const [hours, setHours] = useState(2);
-  const [report, setReport] = useState<SessionReport | null>(null);
-  const [timeline, setTimeline] = useState<TimelinePoint[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const setSelectedUser   = useChatStore((s) => s.setSelectedUser);
+  const removeWatchedUser = useChatStore((s) => s.removeWatchedUser);
+  const activeChannel     = useChatStore((s) => s.activeChannel);
+  const setActiveChannel  = useChatStore((s) => s.setActiveChannel);
 
-  const base = `http://127.0.0.1:${port}`;
+  const [hours, setHours] = useState(2);
+  const [channels, setChannels] = useState<string[]>([]);
+  const [report, setReport]     = useState<SessionReport | null>(null);
+  const [timeline, setTimeline] = useState<TimelinePoint[]>([]);
+  const [threats, setThreats]   = useState<ThreatUser[]>([]);
+  const [watchlist, setWatchlist] = useState<WatchlistEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+
+  const base    = `http://127.0.0.1:${port}`;
   const headers = { 'X-IPC-Secret': ipcSecret };
 
+  // Fetch channel list once on mount
   useEffect(() => {
+    fetch(`${base}/api/channels`, { headers })
+      .then((r) => r.json())
+      .then((data) => setChannels((data.channels ?? []).map((c: { name: string }) => c.name)))
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Refetch data whenever hours or active channel changes
+  useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
+
     setLoading(true);
     setError(null);
 
+    const ch = activeChannel ? `&channel=${encodeURIComponent(activeChannel)}` : '';
+
     Promise.all([
-      fetch(`${base}/api/stats/session?hours=${hours}`, { headers }).then((r) => r.json()),
-      fetch(`${base}/api/stats/timeline?hours=${hours}&bucket_minutes=5`, { headers }).then((r) => r.json()),
+      fetch(`${base}/api/stats/session?hours=${hours}${ch}`, { headers, signal }).then((r) => r.json()),
+      fetch(`${base}/api/stats/timeline?hours=${hours}&bucket_minutes=5${ch}`, { headers, signal }).then((r) => r.json()),
+      fetch(`${base}/api/stats/top_threats?hours=${hours}&limit=20${ch}`, { headers, signal }).then((r) => r.json()),
+      fetch(`${base}/api/stats/watchlist_activity?hours=${hours}${ch}`, { headers, signal }).then((r) => r.json()),
     ])
-      .then(([sess, tl]) => {
+      .then(([sess, tl, th, wl]) => {
         setReport(sess);
         setTimeline(tl.points ?? []);
+        setThreats(th.users ?? []);
+        setWatchlist(wl.users ?? []);
         setLoading(false);
       })
       .catch((e: Error) => {
-        setError(e.message);
-        setLoading(false);
+        if (e.name !== 'AbortError') {
+          setError(e.message);
+          setLoading(false);
+        }
       });
-  }, [hours]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    return () => controller.abort();
+  }, [hours, activeChannel]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function unwatchUser(userId: string) {
+    try {
+      await fetch(`${base}/api/watchlist/${encodeURIComponent(userId)}`, {
+        method: 'DELETE',
+        headers,
+      });
+      removeWatchedUser(userId);
+      setWatchlist((prev) => prev.filter((u) => u.user_id !== userId));
+    } catch { /* ignore */ }
+  }
 
   function downloadCsv(type: 'flagged_users' | 'moderation_actions') {
     const url = `${base}/api/stats/export/${type}?hours=${hours}`;
-    // Build a temporary anchor with the secret in the header — we can't set
-    // headers on a navigation, so fetch + blob approach needed.
     fetch(url, { headers })
       .then((r) => r.blob())
       .then((blob) => {
@@ -155,7 +250,7 @@ export function StatsPage({ port, ipcSecret }: Props) {
 
   return (
     <div className="flex flex-col h-full overflow-y-auto px-4 py-4 gap-5">
-      {/* Header + time range selector */}
+      {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-gray-200">Session Analytics</h2>
         <div className="flex items-center gap-2">
@@ -174,6 +269,35 @@ export function StatsPage({ port, ipcSecret }: Props) {
           ))}
         </div>
       </div>
+
+      {/* Channel selector — only shown when monitoring multiple streams */}
+      {channels.length > 1 && (
+        <div className="flex items-center gap-1 flex-wrap">
+          <button
+            onClick={() => setActiveChannel(null)}
+            className={`text-[11px] px-2 py-0.5 rounded border transition-colors font-mono ${
+              activeChannel === null
+                ? 'bg-surface-3 border-surface-3 text-gray-200'
+                : 'border-surface-3 text-gray-500 hover:text-gray-300 hover:bg-surface-2'
+            }`}
+          >
+            All
+          </button>
+          {channels.map((ch) => (
+            <button
+              key={ch}
+              onClick={() => setActiveChannel(ch)}
+              className={`text-[11px] px-2 py-0.5 rounded border transition-colors font-mono ${
+                activeChannel === ch
+                  ? 'bg-surface-3 border-surface-3 text-gray-200'
+                  : 'border-surface-3 text-gray-500 hover:text-gray-300 hover:bg-surface-2'
+              }`}
+            >
+              #{ch}
+            </button>
+          ))}
+        </div>
+      )}
 
       {loading && <div className="text-xs text-gray-500 text-center py-8">Loading…</div>}
       {error && <div className="text-xs text-red-400 text-center py-8">{error}</div>}
@@ -205,7 +329,12 @@ export function StatsPage({ port, ipcSecret }: Props) {
           {/* Timeline chart */}
           {timeline.length > 1 && (
             <div>
-              <SectionHeader title="Health over time" />
+              <div className="flex items-center justify-between mb-2">
+                <SectionHeader title="Health over time" />
+                {activeChannel && (
+                  <span className="text-[10px] text-gray-600">all channels combined</span>
+                )}
+              </div>
               <ResponsiveContainer width="100%" height={100}>
                 <AreaChart data={timeline} margin={{ top: 4, right: 4, bottom: 0, left: -24 }}>
                   <defs>
@@ -257,20 +386,124 @@ export function StatsPage({ port, ipcSecret }: Props) {
             </div>
           )}
 
-          {/* Top threats */}
-          {report.top_threats.length > 0 && (
+          {/* Suspected users */}
+          {threats.length > 0 && (
             <div>
-              <SectionHeader title="Top threats" />
+              <SectionHeader title={`Suspected users (${threats.length})`} />
               <div className="space-y-1">
-                {report.top_threats.map((u) => (
-                  <div key={u.username} className="flex items-center gap-2 text-xs py-1 border-b border-surface-3 last:border-0">
-                    <span className="text-gray-300 flex-1 truncate">{u.username}</span>
-                    <span className={`font-mono font-bold ${scoreColor(u.max_score)}`}>
-                      {u.max_score}
-                    </span>
-                    <span className="text-gray-600">{u.detections}×</span>
-                  </div>
-                ))}
+                {threats.map((u) => {
+                  const signals = parseSignals(u.last_signals).slice(0, 3);
+                  return (
+                    <div
+                      key={u.user_id}
+                      className="flex flex-col gap-1 py-1.5 border-b border-surface-3 last:border-0"
+                    >
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setSelectedUser({ userId: u.user_id, username: u.username })}
+                          className="text-gray-200 font-mono text-xs flex-1 truncate text-left hover:text-accent-purple transition-colors"
+                        >
+                          {u.username}
+                        </button>
+                        <span
+                          className={`text-[10px] font-mono font-bold border rounded px-1.5 py-0.5 ${scoreBg(u.max_score)}`}
+                        >
+                          {u.max_score}
+                        </span>
+                        <span className="text-[10px] text-gray-600 font-mono">
+                          ×{u.detections}
+                        </span>
+                        {u.last_seen != null && (
+                          <span className="text-[10px] text-gray-600 shrink-0">
+                            {timeAgo(u.last_seen)}
+                          </span>
+                        )}
+                      </div>
+                      {signals.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {signals.map((s) => (
+                            <SignalTag key={s} name={s} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Watchlist activity */}
+          {watchlist.length > 0 && (
+            <div>
+              <SectionHeader title={`Watchlist (${watchlist.length})`} />
+              <div className="space-y-1">
+                {watchlist.map((u) => {
+                  const signals = parseSignals(u.last_signals).slice(0, 3);
+                  const flagged  = u.flag_count > 0;
+                  return (
+                    <div
+                      key={u.user_id}
+                      className="flex flex-col gap-1 py-1.5 border-b border-surface-3 last:border-0 group"
+                    >
+                      <div className="flex items-center gap-2">
+                        {u.priority === 'high' && (
+                          <span
+                            className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0"
+                            title="High priority"
+                          />
+                        )}
+                        <button
+                          onClick={() => setSelectedUser({ userId: u.user_id, username: u.username })}
+                          className="text-gray-200 font-mono text-xs flex-1 truncate text-left hover:text-accent-purple transition-colors"
+                        >
+                          {u.username}
+                        </button>
+                        {u.note && (
+                          <span
+                            className="text-[10px] text-gray-600 truncate max-w-[90px]"
+                            title={u.note}
+                          >
+                            {u.note}
+                          </span>
+                        )}
+                        {flagged ? (
+                          <>
+                            <span
+                              className={`text-[10px] font-mono font-bold border rounded px-1.5 py-0.5 ${scoreBg(u.max_score!)}`}
+                            >
+                              {u.max_score}
+                            </span>
+                            <span className="text-[10px] text-gray-600 font-mono">
+                              ×{u.flag_count}
+                            </span>
+                            {u.last_flagged != null && (
+                              <span className="text-[10px] text-gray-600 shrink-0">
+                                {timeAgo(u.last_flagged)}
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-[10px] text-gray-700">no flags</span>
+                        )}
+                        <button
+                          onClick={() => unwatchUser(u.user_id)}
+                          className="text-[10px] text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-1"
+                          title="Remove from watchlist"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      {signals.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {signals.map((s) => (
+                            <SignalTag key={s} name={s} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
