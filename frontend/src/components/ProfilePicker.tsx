@@ -263,7 +263,7 @@ export function ProfilePicker({ onSelected }: ProfilePickerProps) {
   if (view === 'switching') return <Splash message="Loading profile…" />;
 
   return (
-    <div className="flex flex-col h-screen bg-surface text-white select-none">
+    <div className="flex flex-col h-screen bg-surface text-white">
       {/* Header */}
       <div className="flex items-center gap-3 px-8 pt-10 pb-6">
         <svg width="30" height="30" viewBox="0 0 36 36" fill="none">
@@ -464,14 +464,16 @@ function ProfileCard({
 }: ProfileCardProps) {
   const isRenaming = renamingId === profile.id;
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={busy ? -1 : 0}
       className={[
-        'relative flex flex-col items-start gap-2 p-4 rounded-xl border text-left transition-all',
+        'relative flex flex-col items-start gap-2 p-4 rounded-xl border text-left transition-all cursor-pointer',
         'bg-gray-900 border-gray-700 hover:border-purple-500/60 hover:bg-gray-800/80',
         busy ? 'opacity-60 pointer-events-none' : '',
       ].join(' ')}
-      onClick={onOpen}
-      disabled={busy}
+      onClick={!isRenaming ? onOpen : undefined}
+      onKeyDown={e => { if (!isRenaming && (e.key === 'Enter' || e.key === ' ')) onOpen(); }}
     >
       {/* Name + lock */}
       <div className="flex items-center gap-2 w-full">
@@ -522,6 +524,6 @@ function ProfileCard({
           </button>
         </div>
       )}
-    </button>
+    </div>
   );
 }
