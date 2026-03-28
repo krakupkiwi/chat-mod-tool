@@ -87,8 +87,23 @@ export function ProfilePicker({ onSelected }: ProfilePickerProps) {
   // Busy flag to prevent double-click on cards
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // Refs for reliable Electron focus (autoFocus is unreliable in Electron)
   const passwordRef = useRef<HTMLInputElement>(null);
   const newNameRef = useRef<HTMLInputElement>(null);
+
+  // Focus the name input whenever the create view becomes active
+  useEffect(() => {
+    if (view === 'create') {
+      requestAnimationFrame(() => newNameRef.current?.focus());
+    }
+  }, [view]);
+
+  // Focus the password input whenever the password overlay becomes active
+  useEffect(() => {
+    if (view === 'password') {
+      requestAnimationFrame(() => passwordRef.current?.focus());
+    }
+  }, [view]);
 
   // ── Load profiles ──────────────────────────────────────────────────────────
 
@@ -128,7 +143,6 @@ export function ProfilePicker({ onSelected }: ProfilePickerProps) {
       setPasswordInput('');
       setPasswordError(null);
       setView('password');
-      setTimeout(() => passwordRef.current?.focus(), 50);
       setBusyId(null);
       return;
     }
@@ -140,7 +154,6 @@ export function ProfilePicker({ onSelected }: ProfilePickerProps) {
     setPending({ profileId }); // must be set so onBackendReady knows which profile to confirm
     setView('switching');
     setError(null);
-    // Main process resolves the profile directory from the id
     const result = await window.electronAPI!.profiles.select(profileId);
     if (!result.success) {
       setPending(null);
@@ -169,6 +182,7 @@ export function ProfilePicker({ onSelected }: ProfilePickerProps) {
           : (result.error ?? 'Failed to load profile.')
       );
       setVerifying(false);
+      requestAnimationFrame(() => passwordRef.current?.focus());
       return;
     }
 
@@ -286,7 +300,7 @@ export function ProfilePicker({ onSelected }: ProfilePickerProps) {
         </div>
       )}
 
-      {/* Password prompt overlay */}
+      {/* Password prompt overlay — rendered as a fixed overlay, never inside a button */}
       {view === 'password' && pending && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
           <div className="bg-surface border border-gray-700 rounded-xl p-6 w-80 flex flex-col gap-4">
@@ -332,7 +346,7 @@ export function ProfilePicker({ onSelected }: ProfilePickerProps) {
               <label className="text-xs text-gray-400 mb-1 block">Profile Name</label>
               <input
                 ref={newNameRef}
-                autoFocus
+                type="text"
                 className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm focus:outline-none focus:border-purple-500"
                 placeholder="e.g. Main Channel"
                 value={newName}
@@ -340,7 +354,7 @@ export function ProfilePicker({ onSelected }: ProfilePickerProps) {
                 onKeyDown={e => e.key === 'Enter' && submitCreate()}
               />
             </div>
-            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
               <input
                 type="checkbox"
                 className="accent-purple-500"
@@ -382,7 +396,7 @@ export function ProfilePicker({ onSelected }: ProfilePickerProps) {
                 disabled={creating}
               >
                 {creating && <Spinner size={14} />}
-                Create & Open
+                Create &amp; Open
               </button>
             </div>
           </div>
@@ -465,6 +479,50 @@ function ProfileCard({
   onOpen, onDelete, onStartRename, onRenameChange, onRenameSubmit, onRenameCancel,
 }: ProfileCardProps) {
   const isRenaming = renamingId === profile.id;
+  const renameRef = useRef<HTMLInputElement>(null);
+
+  // Focus rename input reliably when renaming starts
+  useEffect(() => {
+    if (isRenaming) {
+      requestAnimationFrame(() => renameRef.current?.focus());
+    }
+  }, [isRenaming]);
+
+  // When renaming, render as a plain div — NEVER nest an input inside a
+  // role="button" element; Chromium will not give it keyboard focus.
+  if (isRenaming) {
+    return (
+      <div className="relative flex flex-col items-start gap-2 p-4 rounded-xl border bg-gray-900 border-purple-500">
+        <input
+          ref={renameRef}
+          type="text"
+          className="w-full bg-gray-700 border border-purple-500 rounded px-2 py-1 text-sm focus:outline-none"
+          value={renameValue}
+          onChange={e => onRenameChange(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') onRenameSubmit();
+            if (e.key === 'Escape') onRenameCancel();
+          }}
+        />
+        <div className="flex items-center gap-1">
+          <button
+            className="text-xs px-2 py-0.5 bg-purple-600 hover:bg-purple-500 rounded"
+            onClick={onRenameSubmit}
+          >
+            Save
+          </button>
+          <button
+            className="text-xs px-2 py-0.5 text-gray-400 hover:text-white"
+            onClick={onRenameCancel}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Normal card — clickable div, no inputs inside
   return (
     <div
       role="button"
@@ -472,29 +530,14 @@ function ProfileCard({
       className={[
         'relative flex flex-col items-start gap-2 p-4 rounded-xl border text-left transition-all cursor-pointer',
         'bg-gray-900 border-gray-700 hover:border-purple-500/60 hover:bg-gray-800/80',
-        busy ? 'opacity-60 pointer-events-none' : '',
+        busy ? 'opacity-60' : '',
       ].join(' ')}
-      onClick={!isRenaming ? onOpen : undefined}
-      onKeyDown={e => { if (!isRenaming && (e.key === 'Enter' || e.key === ' ')) onOpen(); }}
+      onClick={busy ? undefined : onOpen}
+      onKeyDown={e => { if (!busy && (e.key === 'Enter' || e.key === ' ')) onOpen(); }}
     >
       {/* Name + lock */}
       <div className="flex items-center gap-2 w-full">
-        {isRenaming ? (
-          <input
-            autoFocus
-            className="flex-1 bg-gray-700 border border-purple-500 rounded px-2 py-0.5 text-sm focus:outline-none"
-            value={renameValue}
-            onClick={e => e.stopPropagation()}
-            onChange={e => onRenameChange(e.target.value)}
-            onKeyDown={e => {
-              e.stopPropagation();
-              if (e.key === 'Enter') onRenameSubmit();
-              if (e.key === 'Escape') onRenameCancel();
-            }}
-          />
-        ) : (
-          <span className="font-semibold text-sm flex-1 truncate">{profile.name}</span>
-        )}
+        <span className="font-semibold text-sm flex-1 truncate">{profile.name}</span>
         {profile.encrypted && (
           <span className="text-gray-500 flex-shrink-0" title="Password protected">
             <LockIcon />
@@ -506,26 +549,24 @@ function ProfileCard({
       {/* Last used */}
       <span className="text-xs text-gray-500">Last opened: {formatDate(profile.last_used)}</span>
 
-      {/* Actions */}
-      {!isRenaming && (
-        <div
-          className="flex items-center gap-1 mt-auto pt-2"
-          onClick={e => e.stopPropagation()}
+      {/* Actions — stopPropagation so clicks don't bubble to card's onOpen */}
+      <div
+        className="flex items-center gap-1 mt-auto pt-2"
+        onClick={e => e.stopPropagation()}
+      >
+        <button
+          className="text-xs text-gray-500 hover:text-white px-2 py-0.5 rounded hover:bg-gray-700"
+          onClick={onStartRename}
         >
-          <button
-            className="text-xs text-gray-500 hover:text-white px-2 py-0.5 rounded hover:bg-gray-700"
-            onClick={onStartRename}
-          >
-            Rename
-          </button>
-          <button
-            className="text-xs text-red-500 hover:text-red-300 px-2 py-0.5 rounded hover:bg-red-900/30"
-            onClick={onDelete}
-          >
-            Delete
-          </button>
-        </div>
-      )}
+          Rename
+        </button>
+        <button
+          className="text-xs text-red-500 hover:text-red-300 px-2 py-0.5 rounded hover:bg-red-900/30"
+          onClick={onDelete}
+        >
+          Delete
+        </button>
+      </div>
     </div>
   );
 }

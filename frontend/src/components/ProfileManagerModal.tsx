@@ -13,7 +13,7 @@
  *   - Import a .tidsprofile file (creates new profile, then optionally switch)
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface Props {
   activeProfileId: string | null;
@@ -64,6 +64,24 @@ export function ProfileManagerModal({ activeProfileId, onClose, onSwitchInitiate
 
   // Export
   const [exporting, setExporting] = useState(false);
+
+  // Refs for reliable Electron focus (autoFocus is unreliable in Electron)
+  const createNameRef = useRef<HTMLInputElement>(null);
+  const renameRef = useRef<HTMLInputElement>(null);
+
+  // Focus create-name input when create form opens
+  useEffect(() => {
+    if (showCreate) {
+      requestAnimationFrame(() => createNameRef.current?.focus());
+    }
+  }, [showCreate]);
+
+  // Focus rename input when renaming starts
+  useEffect(() => {
+    if (renamingId) {
+      requestAnimationFrame(() => renameRef.current?.focus());
+    }
+  }, [renamingId]);
 
   const loadProfiles = async () => {
     setLoading(true);
@@ -277,7 +295,8 @@ export function ProfileManagerModal({ activeProfileId, onClose, onSwitchInitiate
                     <div className="flex-1 min-w-0">
                       {isRenaming ? (
                         <input
-                          autoFocus
+                          ref={renameRef}
+                          type="text"
                           className="w-full bg-gray-700 border border-purple-500 rounded px-2 py-0.5 text-sm focus:outline-none"
                           value={renameValue}
                           onChange={e => setRenameValue(e.target.value)}
@@ -348,7 +367,8 @@ export function ProfileManagerModal({ activeProfileId, onClose, onSwitchInitiate
             <div className="mt-4 border border-gray-700 rounded-lg p-4 flex flex-col gap-3">
               <h3 className="text-sm font-medium">New Profile</h3>
               <input
-                autoFocus
+                ref={createNameRef}
+                type="text"
                 className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm focus:outline-none focus:border-purple-500"
                 placeholder="Profile name"
                 value={createName}
