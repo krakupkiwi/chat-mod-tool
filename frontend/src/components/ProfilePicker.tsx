@@ -137,11 +137,13 @@ export function ProfilePicker({ onSelected }: ProfilePickerProps) {
   };
 
   const _activateProfile = async (profileId: string) => {
+    setPending({ profileId }); // must be set so onBackendReady knows which profile to confirm
     setView('switching');
     setError(null);
     // Main process resolves the profile directory from the id
     const result = await window.electronAPI!.profiles.select(profileId);
     if (!result.success) {
+      setPending(null);
       setError(result.error === 'incorrect_password' ? 'Incorrect password.' : (result.error ?? 'Failed to load profile.'));
       setBusyId(null);
       await loadProfiles();
