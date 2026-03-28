@@ -15,6 +15,7 @@
 const {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   session,
   shell,
@@ -27,6 +28,7 @@ const {
 const path = require('path');
 
 const { PythonManager } = require('./python-manager');
+const { ProfileManager } = require('./profile-manager');
 const log = require('./logger');
 
 // Auto-updater — only active in packaged builds (not during development)
@@ -43,7 +45,10 @@ if (!process.env.ELECTRON_IS_DEV) {
 }
 
 const isDev = !app.isPackaged;
-const pythonManager = new PythonManager();
+// pythonManager is created lazily after a profile is selected
+let pythonManager = null;
+// Track which profile is currently active (to block deleting the active one)
+let currentProfileId = null;
 
 let mainWindow = null;
 let tray = null;
@@ -256,6 +261,7 @@ function createTray() {
 // -------------------------------------------------------------------------
 
 async function toggleDetectionMute() {
+  if (!pythonManager) return;
   const { port, ipcSecret } = pythonManager.getConfig();
   if (!port || !ipcSecret) return;
 
@@ -310,31 +316,36 @@ function registerShortcuts() {
 // Python backend startup
 // -------------------------------------------------------------------------
 
-async function startBackend() {
-  pythonManager.on('ready', ({ port, ipcSecret }) => {
+/**
+ * Wire event listeners onto a PythonManager instance and start it.
+ * Called after a profile is selected (from registerIPCHandlers).
+ * @param {PythonManager} mgr
+ */
+async function _wireAndStartBackend(mgr) {
+  mgr.on('ready', ({ port, ipcSecret }) => {
     log.info(`Backend ready — port=${port}`);
     mainWindow?.webContents.send('backend-ready', { port, ipcSecret });
   });
 
-  pythonManager.on('disconnected', () => {
+  mgr.on('disconnected', () => {
     log.warn('Backend disconnected');
     mainWindow?.webContents.send('backend-disconnected');
   });
 
-  // When Python crashes and restarts, send new config to renderer
-  pythonManager.on('ready', ({ port, ipcSecret }) => {
+  // When Python crashes and auto-restarts, send new config to renderer
+  mgr.on('ready', ({ port, ipcSecret }) => {
     mainWindow?.webContents.send('backend-reconnected', { port, ipcSecret });
   });
 
-  pythonManager.on('backend-error', (msg) => {
+  mgr.on('backend-error', (msg) => {
     log.error('Backend error:', msg);
   });
 
   try {
-    await pythonManager.start();
+    await mgr.start();
   } catch (err) {
     log.error('Failed to start Python backend:', err.message);
-    // Show error but don't crash — renderer will show connection error state
+    // Don't crash — renderer will show connection error state
   }
 }
 
@@ -347,8 +358,109 @@ function registerIPCHandlers() {
 
   // Renderer calls this on mount to get backend config if it missed the push event
   ipcMain.handle('get-backend-config', () => {
+    if (!pythonManager) return null;
     const config = pythonManager.getConfig();
     return config.ipcSecret ? config : null;
+  });
+
+  // ── Profile management ──────────────────────────────────────────────────
+
+  ipcMain.handle('profiles-list', () => {
+    return new ProfileManager().listProfiles();
+  });
+
+  ipcMain.handle('profiles-create', (_event, { name, encrypted, password }) => {
+    return new ProfileManager().createProfile(name, { encrypted, password });
+  });
+
+  ipcMain.handle('profiles-rename', (_event, { id, newName }) => {
+    return new ProfileManager().renameProfile(id, newName);
+  });
+
+  ipcMain.handle('profiles-delete', (_event, { id }) => {
+    if (id === currentProfileId) {
+      throw new Error('Cannot delete the currently active profile');
+    }
+    return new ProfileManager().deleteProfile(id);
+  });
+
+  /**
+   * Select a profile: verify password (if encrypted), stop existing backend,
+   * start a new backend for the selected profile, notify renderer.
+   */
+  ipcMain.handle('profile-select', async (_event, { profileId, password }) => {
+    const pm = new ProfileManager();
+
+    // Prevent double-invocation race
+    if (profileId === currentProfileId && pythonManager?.ready) {
+      return { success: true };
+    }
+
+    if (!pm.verifyAccess(profileId, password)) {
+      return { success: false, error: 'incorrect_password' };
+    }
+
+    pm.markLastUsed(profileId);
+
+    // Resolve the profile directory (always derived in main process)
+    const profileDir = pm.getProfileDir(profileId);
+
+    // Stop the existing backend (if any)
+    if (pythonManager) {
+      try { await pythonManager.stop(); } catch (_) {}
+      pythonManager = null;
+    }
+
+    currentProfileId = profileId;
+    pythonManager = new PythonManager({ profileDir, profileId });
+    await _wireAndStartBackend(pythonManager);
+
+    // Notify renderer that a profile switch completed (triggers store reset)
+    mainWindow?.webContents.send('profile-switched', { profileId });
+
+    return { success: true };
+  });
+
+  /**
+   * Export the currently active profile via the Python backend's export endpoint.
+   * Python handles DB snapshotting and encryption.
+   */
+  // Export the currently-active profile (no id needed — backend knows its own dir)
+  ipcMain.handle('profiles-export', async (_event, { destPath, exportPassword }) => {
+    if (!pythonManager) return { success: false, error: 'backend_not_running' };
+    const { port, ipcSecret } = pythonManager.getConfig();
+    if (!port || !ipcSecret) return { success: false, error: 'backend_not_ready' };
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/app-profile/export`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-IPC-Secret': ipcSecret },
+        body: JSON.stringify({ dest_path: destPath, export_password: exportPassword || null }),
+      });
+      if (res.ok) {
+        return { success: true };
+      }
+      const text = await res.text();
+      return { success: false, error: text };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  /**
+   * Import a .tidsprofile file (entirely in Electron — no backend needed).
+   */
+  ipcMain.handle('profiles-import', (_event, { srcPath, importPassword, newName }) => {
+    return new ProfileManager().importProfile(srcPath, { importPassword, newName });
+  });
+
+  // ── Native dialogs ──────────────────────────────────────────────────────
+
+  ipcMain.handle('show-save-dialog', (_event, opts) => {
+    return dialog.showSaveDialog(mainWindow, opts);
+  });
+
+  ipcMain.handle('show-open-dialog', (_event, opts) => {
+    return dialog.showOpenDialog(mainWindow, opts);
   });
 
   ipcMain.on('show-notification', (_event, { title, body }) => {
@@ -402,7 +514,18 @@ app.whenReady().then(async () => {
     createTray();
     registerIPCHandlers();
     registerShortcuts();
-    await startBackend();
+
+    // Migrate legacy data (%APPDATA%\TwitchIDS\data.db) to a "Default" profile
+    // on first run.  No-op if index.json already exists.
+    try {
+      new ProfileManager().migrateFromLegacy();
+    } catch (err) {
+      log.warn(`Legacy profile migration failed (non-fatal): ${err.message}`);
+    }
+
+    // Python backend starts AFTER profile selection (via 'profile-select' IPC).
+    // The renderer will show ProfilePicker immediately and call profile-select
+    // once the user chooses or creates a profile.
 
     // Check for updates ~5s after startup so the window is fully loaded
     if (autoUpdater && app.isPackaged) {
@@ -449,7 +572,9 @@ app.on('will-quit', () => {
 app.on('before-quit', async () => {
   app.isQuitting = true;
   log.info('App quitting — stopping Python backend');
-  await pythonManager.stop();
+  if (pythonManager) {
+    try { await pythonManager.stop(); } catch (_) {}
+  }
 });
 
 // -------------------------------------------------------------------------

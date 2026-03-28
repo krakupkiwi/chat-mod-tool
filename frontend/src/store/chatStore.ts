@@ -179,6 +179,9 @@ interface Store {
   dataRefreshKey: number;
   bumpDataRefreshKey: () => void;
   clearAlerts: () => void;
+
+  /** Reset all transient state when switching profiles (App.tsx onProfileSwitched). */
+  reset: () => void;
 }
 
 export interface AlertExplanation {
@@ -392,6 +395,29 @@ export const useChatStore = create<Store>((set) => ({
   dataRefreshKey: 0,
   bumpDataRefreshKey: () => set((state) => ({ dataRefreshKey: state.dataRefreshKey + 1 })),
   clearAlerts: () => set({ alerts: [] }),
+
+  // Profile switch — reset all transient live state (backend will re-hydrate)
+  reset: () => set({
+    backendConfig: null,
+    backendConnected: false,
+    twitchConnected: false,
+    channel: null,
+    configuredChannel: null,
+    wsState: 'disconnected',
+    messages: [],
+    health: null,
+    responseState: { dryRunMode: true, detectionSuppressed: false, suppressionReason: null },
+    alerts: [],
+    moderationActions: [],
+    channelEvents: [],
+    selectedUser: null,
+    perf: null,
+    watchedUsers: [],
+    automodQueue: [],
+    activeChannel: null,
+    eventLog: [],
+    dataRefreshKey: 0,
+  }),
 
   // Watchlist
   watchedUsers: [],

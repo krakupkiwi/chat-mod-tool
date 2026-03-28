@@ -214,4 +214,37 @@ async def update_config(request: UpdateConfigRequest) -> AppConfig:
         settings.moderation_actions_retention_days = request.moderation_actions_retention_days
         logger.info("Mod-actions retention: %d days (0=keep forever)", settings.moderation_actions_retention_days)
 
+    # Persist changes back to per-profile config.json (no-op when not using profiles)
+    await _persist_profile_config()
+
     return await get_config()
+
+
+async def _persist_profile_config() -> None:
+    """Write the current settings snapshot to the profile's config.json.
+
+    This is a no-op when the backend is running without a profile (legacy mode).
+    """
+    import json
+    path = settings.config_json_path
+    if not path:
+        return
+    data = {
+        "dry_run": settings.dry_run,
+        "auto_timeout_enabled": settings.auto_timeout_enabled,
+        "auto_ban_enabled": settings.auto_ban_enabled,
+        "timeout_threshold": settings.timeout_threshold,
+        "ban_threshold": settings.ban_threshold,
+        "alert_threshold": settings.alert_threshold,
+        "emote_filter_sensitivity": settings.emote_filter_sensitivity,
+        "default_channel": settings.default_channel,
+        "message_retention_days": settings.message_retention_days,
+        "health_history_retention_days": settings.health_history_retention_days,
+        "flagged_users_retention_days": settings.flagged_users_retention_days,
+        "moderation_actions_retention_days": settings.moderation_actions_retention_days,
+    }
+    try:
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        logger.warning("Failed to persist profile config.json: %s", e)

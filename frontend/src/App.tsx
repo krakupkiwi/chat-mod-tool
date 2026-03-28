@@ -29,6 +29,8 @@ import { FollowerAuditModal } from './components/FollowerAuditModal';
 import { NukeModal } from './components/NukeModal';
 import { UnbanRequestPanel } from './components/UnbanRequestPanel';
 import { WatchlistPanel } from './components/WatchlistPanel';
+import { ProfilePicker } from './components/ProfilePicker';
+import { ProfileManagerModal } from './components/ProfileManagerModal';
 
 // Recharts (~450KB) is only needed on the Analytics tab — split it into its own chunk
 const StatsPage = lazy(() => import('./components/StatsPage').then((m) => ({ default: m.StatsPage })));
@@ -309,11 +311,25 @@ function IcnSettings() {
   );
 }
 
+function IcnProfile() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Dashboard
 // ---------------------------------------------------------------------------
 
-function Dashboard({ port, ipcSecret }: { port: number; ipcSecret: string }) {
+function Dashboard({ port, ipcSecret, activeProfileId, onSwitchInitiated }: {
+  port: number;
+  ipcSecret: string;
+  activeProfileId: string | null;
+  onSwitchInitiated: () => void;
+}) {
   const health = useChatStore((s) => s.health);
   const messages = useChatStore((s) => s.messages);
   const activeChannel = useChatStore((s) => s.activeChannel);
@@ -328,6 +344,7 @@ function Dashboard({ port, ipcSecret }: { port: number; ipcSecret: string }) {
   const [dataManagerOpen, setDataManagerOpen] = useState(false);
   const [nukeOpen, setNukeOpen] = useState(false);
   const [followerAuditOpen, setFollowerAuditOpen] = useState(false);
+  const [showProfileManager, setShowProfileManager] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'history'>('dashboard');
   const [refreshing, setRefreshing] = useState(false);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
@@ -430,6 +447,13 @@ function Dashboard({ port, ipcSecret }: { port: number; ipcSecret: string }) {
               <IcnRefresh spinning={refreshing} />
             </button>
             <button
+              onClick={() => setShowProfileManager(true)}
+              title="Profile Manager"
+              className="p-1.5 rounded text-gray-500 hover:text-purple-400 hover:bg-surface-2 transition-colors"
+            >
+              <IcnProfile />
+            </button>
+            <button
               onClick={() => setSettingsOpen(true)}
               title="Settings"
               className="p-1.5 rounded text-gray-500 hover:text-gray-200 hover:bg-surface-2 transition-colors"
@@ -453,6 +477,13 @@ function Dashboard({ port, ipcSecret }: { port: number; ipcSecret: string }) {
       {nukeOpen && <NukeModal port={port} ipcSecret={ipcSecret} onClose={() => setNukeOpen(false)} />}
       {followerAuditOpen && (
         <FollowerAuditModal port={port} ipcSecret={ipcSecret} onClose={() => setFollowerAuditOpen(false)} />
+      )}
+      {showProfileManager && (
+        <ProfileManagerModal
+          activeProfileId={activeProfileId}
+          onClose={() => setShowProfileManager(false)}
+          onSwitchInitiated={onSwitchInitiated}
+        />
       )}
 
       {/* Metrics strip */}
@@ -625,6 +656,17 @@ export default function App() {
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Profile state — picker shown before any backend starts
+  const [profileSelected, setProfileSelected] = useState(false);
+  const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
+
+  // When main.js fires profile-switched (after backend restarts for new profile), update the active ID
+  useEffect(() => {
+    window.electronAPI?.onProfileSwitched(({ profileId }) => {
+      setActiveProfileId(profileId);
+    });
+  }, []);
+
   // Check if setup is needed (no backend yet or not connected to Twitch)
   const [checkingSetup, setCheckingSetup] = useState(true);
   const [needsSetup, setNeedsSetup] = useState(false);
@@ -669,6 +711,23 @@ export default function App() {
     checkAuth();
   }, [backendConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Called by ProfileManagerModal after a successful in-dashboard profile switch
+  function onSwitchInitiated() {
+    useChatStore.getState().reset();
+  }
+
+  // Show profile picker before anything else (no backend running yet)
+  if (!profileSelected) {
+    return (
+      <ProfilePicker
+        onSelected={(profileId) => {
+          setActiveProfileId(profileId);
+          setProfileSelected(true);
+        }}
+      />
+    );
+  }
+
   // While waiting for backend config
   if (!backendConfig) {
     return <Splash message="Starting backend… this usually takes a few seconds" />;
@@ -686,7 +745,12 @@ export default function App() {
 
   return (
     <>
-      <Dashboard port={backendConfig.port} ipcSecret={backendConfig.ipcSecret} />
+      <Dashboard
+        port={backendConfig.port}
+        ipcSecret={backendConfig.ipcSecret}
+        activeProfileId={activeProfileId}
+        onSwitchInitiated={onSwitchInitiated}
+      />
       <UpdateToast />
     </>
   );

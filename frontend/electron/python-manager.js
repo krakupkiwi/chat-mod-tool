@@ -29,8 +29,13 @@ const BACKOFF_BASE_MS = 1_000;
 
 
 class PythonManager extends EventEmitter {
-  constructor() {
+  /**
+   * @param {{profileDir?: string|null, profileId?: string|null}} opts
+   */
+  constructor({ profileDir = null, profileId = null } = {}) {
     super();
+    this.profileDir = profileDir;
+    this.profileId = profileId;
     this.process = null;
     this.port = null;
     this.ipcSecret = null;
@@ -50,9 +55,13 @@ class PythonManager extends EventEmitter {
 
     log.info(`Starting Python backend: ${exe} ${[...scriptArgs].join(' ')} --port ${this.port}`);
 
+    const profileArgs = [];
+    if (this.profileDir) profileArgs.push('--profile-dir', this.profileDir);
+    if (this.profileId)  profileArgs.push('--profile-id', this.profileId);
+
     this.process = spawn(
       exe,
-      [...scriptArgs, '--port', String(this.port), '--parent-pid', String(process.pid)],
+      [...scriptArgs, '--port', String(this.port), '--parent-pid', String(process.pid), ...profileArgs],
       {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
@@ -111,6 +120,23 @@ class PythonManager extends EventEmitter {
         resolve();
       });
     });
+  }
+
+  /**
+   * Stop the current process (if running) and start a new one with new profile args.
+   * @param {string} profileDir
+   * @param {string} profileId
+   */
+  async restart(profileDir, profileId) {
+    this.profileDir = profileDir;
+    this.profileId = profileId;
+    this.restartCount = 0;
+    this.ready = false;
+    if (this.process && !this.process.killed) {
+      await this.stop();
+    }
+    this._shuttingDown = false;
+    await this.start();
   }
 
   getConfig() {

@@ -30,7 +30,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-SERVICE_NAME = "TwitchIDS_v1"
+_SERVICE_BASE = "TwitchIDS_v1"
 MAX_DIRECT_LENGTH = 400  # Stay well below the 512-char WCM limit
 
 # Logical token names used throughout the codebase
@@ -40,6 +40,46 @@ TOKEN_CLIENT_ID = "client_id"
 TOKEN_CLIENT_SECRET = "client_secret"
 TOKEN_CHANNEL = "channel"
 TOKEN_BROADCASTER_ID = "broadcaster_id"   # Twitch numeric user ID for the channel owner
+
+# Keep SERVICE_NAME as a compat alias (points at the legacy base service)
+SERVICE_NAME = _SERVICE_BASE
+
+
+def _service_name() -> str:
+    """Return the Credential Manager service name for the active profile.
+
+    When a profile is active the service name is namespaced with the profile
+    UUID so that multiple profiles can coexist in the Credential Manager
+    without key collisions.
+    """
+    from core.config import settings
+    if settings.profile_id:
+        return f"{_SERVICE_BASE}_{settings.profile_id}"
+    return _SERVICE_BASE
+
+
+def migrate_legacy_tokens(profile_id: str) -> None:
+    """Copy tokens from the base service into the profile-namespaced service.
+
+    Called once on first startup with a newly migrated profile so that the
+    user does not have to re-authenticate.  Does not delete the originals —
+    they become orphaned but are harmless.
+    """
+    namespaced = f"{_SERVICE_BASE}_{profile_id}"
+    all_keys = [TOKEN_ACCESS, TOKEN_REFRESH, TOKEN_CLIENT_ID, TOKEN_CLIENT_SECRET,
+                TOKEN_CHANNEL, TOKEN_BROADCASTER_ID]
+    migrated = 0
+    for key in all_keys:
+        try:
+            if keyring.get_password(namespaced, key) is None:
+                val = keyring.get_password(_SERVICE_BASE, key)
+                if val:
+                    keyring.set_password(namespaced, key, val)
+                    migrated += 1
+        except Exception as e:
+            logger.warning("migrate_legacy_tokens: error copying '%s': %s", key, e)
+    if migrated:
+        logger.info("Migrated %d token(s) from '%s' to '%s'", migrated, _SERVICE_BASE, namespaced)
 
 
 class SecureTokenStore:
@@ -53,9 +93,10 @@ class SecureTokenStore:
         if not token:
             raise ValueError(f"Refusing to store empty token for '{token_type}'")
 
+        svc = _service_name()
         if len(token) <= MAX_DIRECT_LENGTH:
-            keyring.set_password(SERVICE_NAME, token_type, token)
-            logger.debug("Stored '%s' directly in Credential Manager", token_type)
+            keyring.set_password(svc, token_type, token)
+            logger.debug("Stored '%s' directly in Credential Manager (%s)", token_type, svc)
         else:
             # Token too long for direct WCM storage — encrypt it
             if not _FERNET_AVAILABLE:
@@ -67,7 +108,7 @@ class SecureTokenStore:
             key = Fernet.generate_key()
             encrypted = Fernet(key).encrypt(token.encode())
             keyring.set_password(
-                SERVICE_NAME,
+                svc,
                 f"{token_type}_key",
                 base64.b64encode(key).decode(),
             )
@@ -79,9 +120,10 @@ class SecureTokenStore:
 
     def retrieve(self, token_type: str) -> str | None:
         """Return stored token or None if not found."""
+        svc = _service_name()
         # Try direct WCM storage first
         try:
-            direct = keyring.get_password(SERVICE_NAME, token_type)
+            direct = keyring.get_password(svc, token_type)
             if direct:
                 return direct
         except Exception as e:
@@ -89,7 +131,7 @@ class SecureTokenStore:
 
         # Try encrypted file storage
         try:
-            key_b64 = keyring.get_password(SERVICE_NAME, f"{token_type}_key")
+            key_b64 = keyring.get_password(svc, f"{token_type}_key")
             if not key_b64:
                 return None
             token_file = self._token_file(token_type)
@@ -109,9 +151,10 @@ class SecureTokenStore:
 
     def delete(self, token_type: str) -> None:
         """Remove token from storage (used during sign-out)."""
+        svc = _service_name()
         for key_name in [token_type, f"{token_type}_key"]:
             try:
-                keyring.delete_password(SERVICE_NAME, key_name)
+                keyring.delete_password(svc, key_name)
             except keyring.errors.PasswordDeleteError:
                 pass
             except Exception as e:
@@ -133,7 +176,8 @@ class SecureTokenStore:
             self.delete(token_type)
 
     def _token_file(self, token_type: str) -> Path:
-        app_data = Path(os.environ.get("APPDATA", ".")) / "TwitchIDS"
+        from core.config import settings
+        app_data = Path(settings.app_data_dir)
         app_data.mkdir(parents=True, exist_ok=True)
         # Prefix with dot to make less obvious in file browser
         return app_data / f".{token_type}.enc"

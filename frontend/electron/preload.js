@@ -105,4 +105,44 @@ contextBridge.exposeInMainWorld('electronAPI', {
   installUpdate: () => {
     ipcRenderer.send('install-update');
   },
+
+  // ── Profile management ───────────────────────────────────────────────────
+
+  /**
+   * Profile CRUD and selection.
+   * All operations run in the Electron main process (no backend required
+   * except for export, which delegates to the Python API).
+   */
+  profiles: {
+    list: () =>
+      ipcRenderer.invoke('profiles-list'),
+    create: (name, opts) =>
+      ipcRenderer.invoke('profiles-create', { name, ...opts }),
+    rename: (id, newName) =>
+      ipcRenderer.invoke('profiles-rename', { id, newName }),
+    delete: (id) =>
+      ipcRenderer.invoke('profiles-delete', { id }),
+    /** Select (and start the backend for) a profile. Main resolves profileDir. */
+    select: (profileId, password) =>
+      ipcRenderer.invoke('profile-select', { profileId, password }),
+    /** Export the active profile to a file (requires backend running). */
+    export: (destPath, exportPassword) =>
+      ipcRenderer.invoke('profiles-export', { destPath, exportPassword }),
+    /** Import a .tidsprofile file (no backend needed). */
+    import: (srcPath, importPassword, newName) =>
+      ipcRenderer.invoke('profiles-import', { srcPath, importPassword, newName }),
+  },
+
+  /**
+   * Fired by main after a profile switch completes (backend restarted).
+   * The renderer uses this to reset its store before the new backend-ready arrives.
+   */
+  onProfileSwitched: (callback) => {
+    ipcRenderer.on('profile-switched', (_event, data) => callback(data));
+  },
+
+  // ── Native file dialogs ──────────────────────────────────────────────────
+
+  showSaveDialog: (opts) => ipcRenderer.invoke('show-save-dialog', opts),
+  showOpenDialog: (opts) => ipcRenderer.invoke('show-open-dialog', opts),
 });

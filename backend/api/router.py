@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from .routes.app_profile import router as app_profile_router
 from .routes.automod import router as automod_router
 from .routes.banlist import router as banlist_router
 from .routes.channels import router as channels_router
@@ -25,6 +26,7 @@ from .routes.whitelist import router as whitelist_router
 
 
 def register_routes(app: FastAPI) -> None:
+    app.include_router(app_profile_router, prefix="/api")
     app.include_router(automod_router, prefix="/api")
     app.include_router(banlist_router, prefix="/api")
     app.include_router(channels_router, prefix="/api")

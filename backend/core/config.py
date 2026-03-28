@@ -50,9 +50,15 @@ class Settings(BaseSettings):
     flagged_users_retention_days: int = 0      # default: keep indefinitely
     moderation_actions_retention_days: int = 0  # default: keep indefinitely
 
+    # Profile isolation — set by main() before uvicorn starts
+    profile_dir: str | None = None  # Absolute path to active profile directory
+    profile_id: str | None = None   # UUID of active profile (for Credential Manager namespacing)
+
     # Paths
     @property
     def app_data_dir(self) -> str:
+        if self.profile_dir:
+            return self.profile_dir
         return os.path.join(os.environ.get("APPDATA", "."), "TwitchIDS")
 
     @property
@@ -62,6 +68,13 @@ class Settings(BaseSettings):
     @property
     def log_path(self) -> str:
         return os.path.join(self.app_data_dir, "twitchids.log")
+
+    @property
+    def config_json_path(self) -> str | None:
+        """Path to per-profile config.json, or None when not using profiles."""
+        if self.profile_dir:
+            return os.path.join(self.profile_dir, "config.json")
+        return None
 
     @property
     def models_dir(self) -> str:

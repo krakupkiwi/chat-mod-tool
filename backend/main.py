@@ -162,12 +162,22 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=7842)
     parser.add_argument("--parent-pid", type=int, default=None)
     parser.add_argument("--dev", action="store_true")
+    parser.add_argument("--profile-dir", type=str, default=None,
+                        help="Absolute path to the active profile directory")
+    parser.add_argument("--profile-id", type=str, default=None,
+                        help="Profile UUID used to namespace Credential Manager keys")
     args = parser.parse_args()
 
-    # Apply CLI args to settings
+    # Apply CLI args to settings (profile-dir/id must be set before uvicorn starts so
+    # that on_startup() sees them when computing paths and token-store service names)
     settings.port = args.port
     if args.dev:
         settings.dev_mode = True
+    if args.profile_dir:
+        settings.profile_dir = args.profile_dir
+        os.makedirs(args.profile_dir, exist_ok=True)
+    if args.profile_id:
+        settings.profile_id = args.profile_id
 
     # Step 2: Set process priority
     set_below_normal_priority()

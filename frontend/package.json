@@ -12,6 +12,7 @@
     "lint": "eslint src --ext ts,tsx"
   },
   "dependencies": {
+    "adm-zip": "^0.5.10",
     "clsx": "^2.1.1",
     "electron-updater": "^6.8.3",
     "graphology": "^0.26.0",

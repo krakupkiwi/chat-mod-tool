@@ -228,6 +228,38 @@ async def _apply_raid_profiles(engine) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Profile helpers
+# ---------------------------------------------------------------------------
+
+async def _load_profile_config() -> None:
+    """Load per-profile config.json into settings (overrides .env defaults).
+
+    Called early in on_startup() so that all downstream code sees the correct
+    thresholds, dry_run state, and channel for this profile.
+    """
+    path = settings.config_json_path
+    if not path or not os.path.exists(path):
+        return
+    import json
+    FIELDS = [
+        "dry_run", "auto_timeout_enabled", "auto_ban_enabled",
+        "timeout_threshold", "ban_threshold", "alert_threshold",
+        "emote_filter_sensitivity", "default_channel",
+        "message_retention_days", "health_history_retention_days",
+        "flagged_users_retention_days", "moderation_actions_retention_days",
+    ]
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        for field in FIELDS:
+            if field in data:
+                setattr(settings, field, data[field])
+        logger.info("Loaded profile config from %s", path)
+    except Exception:
+        logger.exception("Failed to load profile config.json — using defaults")
+
+
+# ---------------------------------------------------------------------------
 # FastAPI lifecycle hooks
 # ---------------------------------------------------------------------------
 
@@ -242,13 +274,21 @@ async def on_startup() -> None:
             "Never enable the simulator in a production install."
         )
 
-    logger.info("TwitchIDS backend starting on port %d", settings.port)
+    logger.info("TwitchIDS backend starting on port %d (profile=%s)", settings.port, settings.profile_id or "none")
 
-    # Ensure AppData directory exists
+    # Ensure AppData / profile directory exists
     os.makedirs(settings.app_data_dir, exist_ok=True)
 
     # Initialize SQLite schema
     await init_db(settings.db_path)
+
+    # Load per-profile config.json (overrides .env defaults for this profile)
+    await _load_profile_config()
+
+    # Migrate legacy WCM tokens to the profile-namespaced service on first use
+    if settings.profile_id:
+        from twitch.token_store import migrate_legacy_tokens
+        migrate_legacy_tokens(settings.profile_id)
 
     # Initialize reputation store (persistent cross-session user scores)
     reputation_store = ReputationStore(settings.db_path)
