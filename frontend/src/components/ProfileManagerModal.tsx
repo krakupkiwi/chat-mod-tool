@@ -113,7 +113,7 @@ export function ProfileManagerModal({ activeProfileId, onClose, onSwitchInitiate
 
   // ── Create profile ──────────────────────────────────────────────────────────
 
-  const submitCreate = async () => {
+  const submitCreate = async (andSwitch = false) => {
     if (creating) return;
     if (!createName.trim()) { setError('Profile name cannot be empty.'); return; }
     if (createEncrypted && !createPassword) { setError('Password is required.'); return; }
@@ -122,13 +122,28 @@ export function ProfileManagerModal({ activeProfileId, onClose, onSwitchInitiate
     setCreating(true);
     setError(null);
     try {
-      await window.electronAPI!.profiles.create(
+      const { id } = await window.electronAPI!.profiles.create(
         createName.trim(),
         { encrypted: createEncrypted, password: createEncrypted ? createPassword : undefined }
       );
       setCreateName(''); setCreatePassword(''); setCreatePasswordConfirm(''); setCreateEncrypted(false);
       setShowCreate(false);
-      await loadProfiles();
+
+      if (andSwitch) {
+        // Switch immediately to the new profile
+        setBusyId(id);
+        const result = await window.electronAPI!.profiles.select(id);
+        if (!result.success) {
+          setError(result.error ?? 'Switch failed');
+          setBusyId(null);
+          await loadProfiles();
+        } else {
+          onSwitchInitiated();
+          onClose();
+        }
+      } else {
+        await loadProfiles();
+      }
     } catch (e: unknown) {
       setError(String(e));
     } finally {
@@ -352,8 +367,11 @@ export function ProfileManagerModal({ activeProfileId, onClose, onSwitchInitiate
               )}
               <div className="flex gap-2 justify-end">
                 <button className="text-xs px-3 py-1.5 text-gray-400 hover:text-white" onClick={() => setShowCreate(false)}>Cancel</button>
-                <button className="text-xs px-3 py-1.5 bg-purple-600 hover:bg-purple-500 rounded flex items-center gap-1" onClick={submitCreate} disabled={creating}>
-                  {creating && <Spinner size={12} />} Create
+                <button className="text-xs px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded flex items-center gap-1" onClick={() => submitCreate(false)} disabled={creating}>
+                  Create
+                </button>
+                <button className="text-xs px-3 py-1.5 bg-purple-600 hover:bg-purple-500 rounded flex items-center gap-1" onClick={() => submitCreate(true)} disabled={creating}>
+                  {creating && <Spinner size={12} />} Create &amp; Switch
                 </button>
               </div>
             </div>

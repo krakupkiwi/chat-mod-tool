@@ -413,9 +413,19 @@ function registerIPCHandlers() {
 
     currentProfileId = profileId;
     pythonManager = new PythonManager({ profileDir, profileId });
-    await _wireAndStartBackend(pythonManager);
 
-    // Notify renderer that a profile switch completed (triggers store reset)
+    // Fire-and-forget: do NOT await _wireAndStartBackend.
+    // If we await, Python emits 'ready' → 'backend-ready' is sent to the renderer
+    // BEFORE this IPC call returns. The renderer's onSwitchInitiated/reset() then
+    // runs and wipes the new backendConfig, leaving the app stuck on Splash.
+    // By returning first, the renderer resets the store, and 'backend-ready' arrives
+    // afterward so useBackend can set the new config cleanly.
+    _wireAndStartBackend(pythonManager).catch((err) => {
+      log.error(`Backend start error (profile ${profileId}): ${err.message}`);
+      mainWindow?.webContents.send('backend-disconnected');
+    });
+
+    // Notify renderer of the new active profile (updates activeProfileId in App)
     mainWindow?.webContents.send('profile-switched', { profileId });
 
     return { success: true };
